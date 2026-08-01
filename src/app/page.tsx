@@ -20,6 +20,10 @@ import {
 } from "@/components/PaymentModal";
 
 import {
+  StaffLoginModal,
+} from "@/components/StaffLoginModal";
+
+import {
   DEFAULT_PRODUCTS,
   loadMenu,
   menuCategories,
@@ -34,6 +38,14 @@ import {
   loadOrders,
   type SavedOrder,
 } from "@/lib/orderStorage";
+
+import {
+  clearActiveStaff,
+  DEMO_STAFF,
+  loadActiveStaff,
+  saveActiveStaff,
+  type StaffMember,
+} from "@/lib/staffStorage";
 
 const categories = [
   "All",
@@ -104,7 +116,23 @@ export default function Home() {
     setIsMenuManagementOpen,
   ] = useState(false);
 
+  const [
+    activeStaff,
+    setActiveStaff,
+  ] = useState<StaffMember | null>(null);
+
+  const [
+    isStaffLoginOpen,
+    setIsStaffLoginOpen,
+  ] = useState(true);
+
   useEffect(() => {
+    const storedStaff =
+      loadActiveStaff();
+
+    setActiveStaff(storedStaff);
+    setIsStaffLoginOpen(!storedStaff);
+
     setProducts(loadMenu());
 
     const existingOrders =
@@ -144,6 +172,44 @@ export default function Home() {
       highestOrderNumber + 1,
     );
   }, []);
+
+  const canViewOrderHistory =
+    activeStaff?.role === "Supervisor" ||
+    activeStaff?.role === "Manager";
+
+  const canManageMenu =
+    activeStaff?.role === "Manager";
+
+  const handleStaffLogin = (
+    staff: StaffMember,
+  ) => {
+    saveActiveStaff(staff);
+    setActiveStaff(staff);
+    setIsStaffLoginOpen(false);
+    setNotice(
+      `${staff.name} signed in as ${staff.role}.`,
+    );
+  };
+
+  const handleSwitchStaff = () => {
+    if (
+      cart.length > 0 &&
+      !window.confirm(
+        "Switching staff will clear the current order. Continue?",
+      )
+    ) {
+      return;
+    }
+
+    clearActiveStaff();
+    setActiveStaff(null);
+    setCart([]);
+    setNotice("");
+    setIsPaymentOpen(false);
+    setIsOrderHistoryOpen(false);
+    setIsMenuManagementOpen(false);
+    setIsStaffLoginOpen(true);
+  };
 
   const filteredProducts =
     useMemo(() => {
@@ -383,26 +449,38 @@ export default function Home() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() =>
-              setIsMenuManagementOpen(
-                true,
-              )
-            }
-            className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-orange-600"
-          >
-            Manage Menu
-          </button>
+          {canManageMenu && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsMenuManagementOpen(
+                  true,
+                )
+              }
+              className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-orange-600"
+            >
+              Manage Menu
+            </button>
+          )}
+
+          {canViewOrderHistory && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsOrderHistoryOpen(true)
+              }
+              className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+            >
+              Order History
+            </button>
+          )}
 
           <button
             type="button"
-            onClick={() =>
-              setIsOrderHistoryOpen(true)
-            }
+            onClick={handleSwitchStaff}
             className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
           >
-            Order History
+            Switch Staff
           </button>
 
           <div className="text-right">
@@ -411,12 +489,16 @@ export default function Home() {
             </p>
 
             <p className="text-xs text-slate-400">
-              Cashier: Kay
+              {activeStaff
+                ? `${activeStaff.role}: ${activeStaff.name}`
+                : "No staff signed in"}
             </p>
           </div>
 
           <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-500 font-black">
-            K
+            {activeStaff?.name
+              .slice(0, 1)
+              .toUpperCase() ?? "?"}
           </div>
         </div>
       </header>
@@ -703,6 +785,12 @@ export default function Home() {
           </div>
         </aside>
       </div>
+
+      <StaffLoginModal
+        isOpen={isStaffLoginOpen}
+        staffMembers={DEMO_STAFF}
+        onLogin={handleStaffLogin}
+      />
 
       <MenuManagementModal
         isOpen={isMenuManagementOpen}
