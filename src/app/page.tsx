@@ -937,13 +937,17 @@ export default function Home() {
         onSave={handleMenuSave}
       />
 
-      <OrderHistoryModal
-        isOpen={isOrderHistoryOpen}
-        orders={savedOrders}
-        onClose={() =>
-          setIsOrderHistoryOpen(false)
-        }
-      />
+<OrderHistoryModal
+  isOpen={isOrderHistoryOpen}
+  orders={savedOrders}
+  activeStaff={activeStaff}
+  onOrdersChange={
+    setSavedOrders
+  }
+  onClose={() =>
+    setIsOrderHistoryOpen(false)
+  }
+/>
 
       <SalesReportModal
         isOpen={isSalesReportOpen}

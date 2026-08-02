@@ -86,6 +86,24 @@ function getTaxTypeLabel(
     : "Non-VAT Sale";
 }
 
+function getStatusClasses(
+  status: SavedOrder["status"],
+) {
+  switch (status) {
+    case "Voided":
+      return "bg-red-100 text-red-700";
+
+    case "Refunded":
+      return "bg-purple-100 text-purple-700";
+
+    case "Partially Refunded":
+      return "bg-amber-100 text-amber-800";
+
+    default:
+      return "bg-green-100 text-green-700";
+  }
+}
+
 export function SalesReportModal({
   isOpen,
   orders,
@@ -212,7 +230,7 @@ export function SalesReportModal({
       window.open(
         "",
         "_blank",
-        "width=1100,height=850",
+        "width=1200,height=900",
       );
 
     if (!reportWindow) {
@@ -232,9 +250,7 @@ export function SalesReportModal({
                 index,
               ) => `
                 <tr>
-                  <td>
-                    ${index + 1}
-                  </td>
+                  <td>${index + 1}</td>
 
                   <td>
                     ${escapeHtml(
@@ -293,6 +309,12 @@ export function SalesReportModal({
 
                   <td>
                     ${escapeHtml(
+                      order.status,
+                    )}
+                  </td>
+
+                  <td>
+                    ${escapeHtml(
                       order.orderType,
                     )}
                   </td>
@@ -319,6 +341,13 @@ export function SalesReportModal({
 
                   <td class="right">
                     ${currencyFormatter.format(
+                      order.refundedAmount ??
+                        0,
+                    )}
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
                       order.netAmount,
                     )}
                   </td>
@@ -341,10 +370,10 @@ export function SalesReportModal({
         : `
             <tr>
               <td
-                colspan="9"
+                colspan="11"
                 class="empty"
               >
-                No completed orders in this report.
+                No orders match this report.
               </td>
             </tr>
           `;
@@ -445,7 +474,7 @@ export function SalesReportModal({
             .card strong {
               display: block;
               margin-top: 7px;
-              font-size: 20px;
+              font-size: 18px;
             }
 
             .section {
@@ -461,12 +490,12 @@ export function SalesReportModal({
               width: 100%;
               border-collapse:
                 collapse;
-              font-size: 10px;
+              font-size: 9px;
             }
 
             th,
             td {
-              padding: 8px;
+              padding: 7px;
               border:
                 1px solid #cbd5e1;
               text-align: left;
@@ -579,7 +608,7 @@ export function SalesReportModal({
           <section class="cards">
             <div class="card">
               <p>
-                Gross sales
+                Recognised gross sales
               </p>
 
               <strong>
@@ -591,7 +620,7 @@ export function SalesReportModal({
 
             <div class="card">
               <p>
-                Net sales
+                Recognised net sales
               </p>
 
               <strong>
@@ -615,13 +644,61 @@ export function SalesReportModal({
 
             <div class="card">
               <p>
-                Completed orders
+                Active orders
               </p>
 
               <strong>
                 ${
                   summary.totalOrders
                 }
+              </strong>
+            </div>
+
+            <div class="card">
+              <p>
+                Original gross sales
+              </p>
+
+              <strong>
+                ${currencyFormatter.format(
+                  summary.originalGrossSales,
+                )}
+              </strong>
+            </div>
+
+            <div class="card">
+              <p>
+                Refunded sales
+              </p>
+
+              <strong>
+                ${currencyFormatter.format(
+                  summary.refundedSales,
+                )}
+              </strong>
+            </div>
+
+            <div class="card">
+              <p>
+                VAT reversed
+              </p>
+
+              <strong>
+                ${currencyFormatter.format(
+                  summary.vatReversed,
+                )}
+              </strong>
+            </div>
+
+            <div class="card">
+              <p>
+                Voided sales
+              </p>
+
+              <strong>
+                ${currencyFormatter.format(
+                  summary.voidedSales,
+                )}
               </strong>
             </div>
 
@@ -676,6 +753,116 @@ export function SalesReportModal({
 
           <section class="section">
             <h2>
+              Adjustments and statuses
+            </h2>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>
+                    Measure
+                  </th>
+
+                  <th class="right">
+                    Orders
+                  </th>
+
+                  <th class="right">
+                    Amount
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr>
+                  <td>
+                    Completed
+                  </td>
+
+                  <td class="right">
+                    ${
+                      summary.completedOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    —
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    Partially refunded
+                  </td>
+
+                  <td class="right">
+                    ${
+                      summary.partiallyRefundedOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      summary.refundedSales,
+                    )}
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    Fully refunded
+                  </td>
+
+                  <td class="right">
+                    ${
+                      summary.refundedOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    —
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    Voided
+                  </td>
+
+                  <td class="right">
+                    ${
+                      summary.voidedOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      summary.voidedSales,
+                    )}
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    VAT reversed
+                  </td>
+
+                  <td class="right">
+                    —
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      summary.vatReversed,
+                    )}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h2>
               VAT breakdown
             </h2>
 
@@ -691,7 +878,7 @@ export function SalesReportModal({
                   </th>
 
                   <th class="right">
-                    Gross sales
+                    Recognised sales
                   </th>
 
                   <th class="right">
@@ -769,7 +956,7 @@ export function SalesReportModal({
                   </th>
 
                   <th class="right">
-                    Sales
+                    Recognised sales
                   </th>
                 </tr>
               </thead>
@@ -883,7 +1070,7 @@ export function SalesReportModal({
                   </th>
 
                   <th class="right">
-                    Revenue
+                    Recognised revenue
                   </th>
                 </tr>
               </thead>
@@ -896,7 +1083,7 @@ export function SalesReportModal({
 
           <section class="section">
             <h2>
-              Completed orders
+              Matching orders
             </h2>
 
             <table>
@@ -907,7 +1094,11 @@ export function SalesReportModal({
                   </th>
 
                   <th>
-                    Date and time
+                    Date
+                  </th>
+
+                  <th>
+                    Status
                   </th>
 
                   <th>
@@ -927,6 +1118,10 @@ export function SalesReportModal({
                   </th>
 
                   <th class="right">
+                    Refunded
+                  </th>
+
+                  <th class="right">
                     Net
                   </th>
 
@@ -935,7 +1130,7 @@ export function SalesReportModal({
                   </th>
 
                   <th class="right">
-                    Total
+                    Recognised total
                   </th>
                 </tr>
               </thead>
@@ -1181,7 +1376,7 @@ export function SalesReportModal({
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <article className="rounded-2xl bg-slate-950 p-5 text-white">
               <p className="text-sm font-semibold text-slate-400">
-                Gross sales
+                Recognised gross sales
               </p>
 
               <p className="mt-3 text-3xl font-black">
@@ -1193,7 +1388,7 @@ export function SalesReportModal({
 
             <article className="rounded-2xl border border-slate-200 bg-white p-5">
               <p className="text-sm font-semibold text-slate-500">
-                Net sales
+                Recognised net sales
               </p>
 
               <p className="mt-3 text-3xl font-black">
@@ -1217,13 +1412,61 @@ export function SalesReportModal({
 
             <article className="rounded-2xl border border-slate-200 bg-white p-5">
               <p className="text-sm font-semibold text-slate-500">
-                Orders
+                Active orders
               </p>
 
               <p className="mt-3 text-3xl font-black">
                 {
                   summary.totalOrders
                 }
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-purple-200 bg-purple-50 p-5">
+              <p className="text-sm font-semibold text-purple-700">
+                Refunded sales
+              </p>
+
+              <p className="mt-3 text-3xl font-black text-purple-900">
+                {currencyFormatter.format(
+                  summary.refundedSales,
+                )}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+              <p className="text-sm font-semibold text-amber-700">
+                VAT reversed
+              </p>
+
+              <p className="mt-3 text-3xl font-black text-amber-900">
+                {currencyFormatter.format(
+                  summary.vatReversed,
+                )}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-red-200 bg-red-50 p-5">
+              <p className="text-sm font-semibold text-red-700">
+                Voided sales
+              </p>
+
+              <p className="mt-3 text-3xl font-black text-red-900">
+                {currencyFormatter.format(
+                  summary.voidedSales,
+                )}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-slate-200 bg-white p-5">
+              <p className="text-sm font-semibold text-slate-500">
+                Original gross sales
+              </p>
+
+              <p className="mt-3 text-3xl font-black">
+                {currencyFormatter.format(
+                  summary.originalGrossSales,
+                )}
               </p>
             </article>
 
@@ -1301,6 +1544,106 @@ export function SalesReportModal({
           <div className="mt-5 grid gap-5 lg:grid-cols-3">
             <section className="rounded-2xl border border-slate-200 bg-white p-5">
               <p className="text-sm font-bold uppercase tracking-wider text-orange-500">
+                Adjustments
+              </p>
+
+              <div className="mt-4 space-y-3">
+                <div className="flex justify-between rounded-xl bg-purple-50 p-4">
+                  <span className="font-black">
+                    Refunds
+                  </span>
+
+                  <span className="font-black text-purple-800">
+                    {currencyFormatter.format(
+                      summary.refundedSales,
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex justify-between rounded-xl bg-amber-50 p-4">
+                  <span className="font-black">
+                    VAT reversed
+                  </span>
+
+                  <span className="font-black text-amber-800">
+                    {currencyFormatter.format(
+                      summary.vatReversed,
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex justify-between rounded-xl bg-red-50 p-4">
+                  <span className="font-black">
+                    Voided sales
+                  </span>
+
+                  <span className="font-black text-red-800">
+                    {currencyFormatter.format(
+                      summary.voidedSales,
+                    )}
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5">
+              <p className="text-sm font-bold uppercase tracking-wider text-orange-500">
+                Order statuses
+              </p>
+
+              <div className="mt-4 grid grid-cols-2 gap-3 text-center">
+                <div className="rounded-xl bg-green-50 p-4">
+                  <p className="text-sm text-green-700">
+                    Completed
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black text-green-900">
+                    {
+                      summary.completedOrders
+                    }
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-amber-50 p-4">
+                  <p className="text-sm text-amber-700">
+                    Partial refunds
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black text-amber-900">
+                    {
+                      summary.partiallyRefundedOrders
+                    }
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-purple-50 p-4">
+                  <p className="text-sm text-purple-700">
+                    Refunded
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black text-purple-900">
+                    {
+                      summary.refundedOrders
+                    }
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-red-50 p-4">
+                  <p className="text-sm text-red-700">
+                    Voided
+                  </p>
+
+                  <p className="mt-2 text-2xl font-black text-red-900">
+                    {
+                      summary.voidedOrders
+                    }
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5">
+              <p className="text-sm font-bold uppercase tracking-wider text-orange-500">
                 Tax breakdown
               </p>
 
@@ -1344,7 +1687,9 @@ export function SalesReportModal({
                 </div>
               </div>
             </section>
+          </div>
 
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
             <section className="rounded-2xl border border-slate-200 bg-white p-5">
               <p className="text-sm font-bold uppercase tracking-wider text-orange-500">
                 Payments
@@ -1494,7 +1839,7 @@ export function SalesReportModal({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px] text-sm">
+              <table className="w-full min-w-[1400px] text-sm">
                 <thead className="bg-slate-100 text-left">
                   <tr>
                     <th className="px-5 py-3">
@@ -1503,6 +1848,10 @@ export function SalesReportModal({
 
                     <th className="px-5 py-3">
                       Date
+                    </th>
+
+                    <th className="px-5 py-3">
+                      Status
                     </th>
 
                     <th className="px-5 py-3">
@@ -1522,6 +1871,10 @@ export function SalesReportModal({
                     </th>
 
                     <th className="px-5 py-3 text-right">
+                      Refunded
+                    </th>
+
+                    <th className="px-5 py-3 text-right">
                       Net
                     </th>
 
@@ -1530,7 +1883,7 @@ export function SalesReportModal({
                     </th>
 
                     <th className="px-5 py-3 text-right">
-                      Total
+                      Recognised total
                     </th>
                   </tr>
                 </thead>
@@ -1540,10 +1893,10 @@ export function SalesReportModal({
                     .length === 0 ? (
                     <tr>
                       <td
-                        colSpan={9}
+                        colSpan={11}
                         className="px-5 py-12 text-center text-slate-500"
                       >
-                        No completed orders match these filters.
+                        No orders match these filters.
                       </td>
                     </tr>
                   ) : (
@@ -1553,7 +1906,12 @@ export function SalesReportModal({
                           key={
                             order.id
                           }
-                          className="border-t border-slate-200"
+                          className={`border-t border-slate-200 ${
+                            order.status ===
+                            "Voided"
+                              ? "bg-red-50"
+                              : ""
+                          }`}
                         >
                           <td className="px-5 py-4 font-black">
                             #
@@ -1568,6 +1926,18 @@ export function SalesReportModal({
                                 order.createdAt,
                               ),
                             )}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-bold ${getStatusClasses(
+                                order.status,
+                              )}`}
+                            >
+                              {
+                                order.status
+                              }
+                            </span>
                           </td>
 
                           <td className="px-5 py-4">
@@ -1601,6 +1971,13 @@ export function SalesReportModal({
                             {
                               order.itemCount
                             }
+                          </td>
+
+                          <td className="px-5 py-4 text-right text-purple-700">
+                            {currencyFormatter.format(
+                              order.refundedAmount ??
+                                0,
+                            )}
                           </td>
 
                           <td className="px-5 py-4 text-right">

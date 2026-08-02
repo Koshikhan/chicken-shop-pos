@@ -1,5 +1,6 @@
-import type {
-    SavedOrder,
+import {
+    getOrderFinancialSummary,
+    type SavedOrder,
   } from "@/lib/orderStorage";
   
   export type PaymentFilter =
@@ -32,14 +33,19 @@ import type {
     startDate: string;
     endDate: string;
   
-    // Gross customer-facing sales total.
+    // Recognised sales after refunds and voids.
     totalSales: number;
-  
-    // Sales before VAT.
     netSales: number;
-  
-    // VAT included in VAT sales.
     vatCollected: number;
+  
+    // Original value before refunds.
+    originalGrossSales: number;
+  
+    // Adjustments.
+    refundedSales: number;
+    refundedNetAmount: number;
+    vatReversed: number;
+    voidedSales: number;
   
     vatSales: number;
     nonVatSales: number;
@@ -48,6 +54,11 @@ import type {
     nonVatOrders: number;
   
     totalOrders: number;
+    completedOrders: number;
+    partiallyRefundedOrders: number;
+    refundedOrders: number;
+    voidedOrders: number;
+  
     averageOrderValue: number;
   
     cashSales: number;
@@ -62,13 +73,20 @@ import type {
   
     totalItems: number;
     topProducts: ProductSales[];
+  
+    /*
+     * Orders returned here contain recognised
+     * net, VAT and gross amounts so the report
+     * table displays adjusted figures.
+     */
     filteredOrders: SavedOrder[];
   };
   
   export function getLocalDateKey(
     date: Date,
   ) {
-    const year = date.getFullYear();
+    const year =
+      date.getFullYear();
   
     const month = String(
       date.getMonth() + 1,
@@ -88,7 +106,8 @@ import type {
   }
   
   export function getWeekStartDateKey() {
-    const today = new Date();
+    const today =
+      new Date();
   
     const dayOfWeek =
       today.getDay();
@@ -112,7 +131,8 @@ import type {
   }
   
   export function getMonthStartDateKey() {
-    const today = new Date();
+    const today =
+      new Date();
   
     const monthStart =
       new Date(
@@ -126,11 +146,20 @@ import type {
     );
   }
   
+  function roundCurrency(
+    amount: number,
+  ) {
+    return Math.round(
+      (amount + Number.EPSILON) *
+        100,
+    ) / 100;
+  }
+  
   export function calculateSalesSummary(
     orders: SavedOrder[],
     filters: SalesReportFilters,
   ): SalesSummary {
-    const filteredOrders =
+    const matchingOrders =
       orders.filter((order) => {
         const orderDate =
           getLocalDateKey(
@@ -171,115 +200,244 @@ import type {
         );
       });
   
+    const orderFinancials =
+      matchingOrders.map(
+        (order) => ({
+          order,
+          financial:
+            getOrderFinancialSummary(
+              order,
+            ),
+        }),
+      );
+  
+    const nonVoidedOrders =
+      orderFinancials.filter(
+        ({ order }) =>
+          order.status !==
+          "Voided",
+      );
+  
+    const filteredOrders =
+      orderFinancials.map(
+        ({
+          order,
+          financial,
+        }) => ({
+          ...order,
+          subtotal:
+            financial.recognisedGrossAmount,
+          netAmount:
+            financial.recognisedNetAmount,
+          vatAmount:
+            financial.recognisedVatAmount,
+        }),
+      );
+  
     const totalSales =
-      filteredOrders.reduce(
-        (total, order) =>
+      orderFinancials.reduce(
+        (total, entry) =>
           total +
-          order.subtotal,
+          entry.financial
+            .recognisedGrossAmount,
         0,
       );
   
     const netSales =
-      filteredOrders.reduce(
-        (total, order) =>
+      orderFinancials.reduce(
+        (total, entry) =>
           total +
-          order.netAmount,
+          entry.financial
+            .recognisedNetAmount,
         0,
       );
   
     const vatCollected =
-      filteredOrders.reduce(
-        (total, order) =>
+      orderFinancials.reduce(
+        (total, entry) =>
           total +
-          order.vatAmount,
+          entry.financial
+            .recognisedVatAmount,
         0,
       );
   
-    const vatOrders =
-      filteredOrders.filter(
-        (order) =>
+    const originalGrossSales =
+      nonVoidedOrders.reduce(
+        (total, entry) =>
+          total +
+          entry.financial
+            .originalGrossAmount,
+        0,
+      );
+  
+    const refundedSales =
+      nonVoidedOrders.reduce(
+        (total, entry) =>
+          total +
+          entry.financial
+            .refundedGrossAmount,
+        0,
+      );
+  
+    const refundedNetAmount =
+      nonVoidedOrders.reduce(
+        (total, entry) =>
+          total +
+          entry.financial
+            .refundedNetAmount,
+        0,
+      );
+  
+    const vatReversed =
+      nonVoidedOrders.reduce(
+        (total, entry) =>
+          total +
+          entry.financial
+            .refundedVatAmount,
+        0,
+      );
+  
+    const voidedEntries =
+      orderFinancials.filter(
+        ({ order }) =>
+          order.status ===
+          "Voided",
+      );
+  
+    const voidedSales =
+      voidedEntries.reduce(
+        (total, entry) =>
+          total +
+          entry.financial
+            .originalGrossAmount,
+        0,
+      );
+  
+    const vatEntries =
+      nonVoidedOrders.filter(
+        ({ order }) =>
           order.taxType === "VAT",
       );
   
-    const nonVatOrders =
-      filteredOrders.filter(
-        (order) =>
+    const nonVatEntries =
+      nonVoidedOrders.filter(
+        ({ order }) =>
           order.taxType ===
           "NON_VAT",
       );
   
     const vatSales =
-      vatOrders.reduce(
-        (total, order) =>
+      vatEntries.reduce(
+        (total, entry) =>
           total +
-          order.subtotal,
+          entry.financial
+            .recognisedGrossAmount,
         0,
       );
   
     const nonVatSales =
-      nonVatOrders.reduce(
-        (total, order) =>
+      nonVatEntries.reduce(
+        (total, entry) =>
           total +
-          order.subtotal,
+          entry.financial
+            .recognisedGrossAmount,
         0,
       );
   
-    const cashOrders =
-      filteredOrders.filter(
-        (order) =>
+    const cashEntries =
+      nonVoidedOrders.filter(
+        ({ order }) =>
           order.paymentMethod ===
           "Cash",
       );
   
-    const cardOrders =
-      filteredOrders.filter(
-        (order) =>
+    const cardEntries =
+      nonVoidedOrders.filter(
+        ({ order }) =>
           order.paymentMethod ===
           "Card",
       );
   
     const cashSales =
-      cashOrders.reduce(
-        (total, order) =>
+      cashEntries.reduce(
+        (total, entry) =>
           total +
-          order.subtotal,
+          entry.financial
+            .recognisedGrossAmount,
         0,
       );
   
     const cardSales =
-      cardOrders.reduce(
-        (total, order) =>
+      cardEntries.reduce(
+        (total, entry) =>
           total +
-          order.subtotal,
+          entry.financial
+            .recognisedGrossAmount,
         0,
       );
   
     const takeawayOrders =
-      filteredOrders.filter(
-        (order) =>
+      nonVoidedOrders.filter(
+        ({ order }) =>
           order.orderType ===
           "Takeaway",
       ).length;
   
     const eatInOrders =
-      filteredOrders.filter(
-        (order) =>
+      nonVoidedOrders.filter(
+        ({ order }) =>
           order.orderType ===
           "Eat In",
       ).length;
   
     const deliveryOrders =
-      filteredOrders.filter(
-        (order) =>
+      nonVoidedOrders.filter(
+        ({ order }) =>
           order.orderType ===
           "Delivery",
       ).length;
   
+    const completedEntries =
+      nonVoidedOrders.filter(
+        ({ order }) =>
+          order.status ===
+          "Completed",
+      );
+  
+    const partiallyRefundedEntries =
+      nonVoidedOrders.filter(
+        ({ order }) =>
+          order.status ===
+          "Partially Refunded",
+      );
+  
+    const refundedEntries =
+      nonVoidedOrders.filter(
+        ({ order }) =>
+          order.status ===
+          "Refunded",
+      );
+  
+    /*
+     * Fully refunded and voided orders no
+     * longer contribute to items sold.
+     *
+     * Partial refunds do not identify which
+     * product was returned, so their original
+     * item quantity remains in this MVP.
+     */
+    const itemSalesEntries =
+      nonVoidedOrders.filter(
+        ({ order }) =>
+          order.status !==
+          "Refunded",
+      );
+  
     const totalItems =
-      filteredOrders.reduce(
-        (total, order) =>
+      itemSalesEntries.reduce(
+        (total, entry) =>
           total +
-          order.itemCount,
+          entry.order.itemCount,
         0,
       );
   
@@ -289,8 +447,18 @@ import type {
         ProductSales
       >();
   
-    filteredOrders.forEach(
-      (order) => {
+    itemSalesEntries.forEach(
+      ({
+        order,
+        financial,
+      }) => {
+        const recognisedRatio =
+          order.subtotal > 0
+            ? financial
+                .recognisedGrossAmount /
+              order.subtotal
+            : 0;
+  
         order.items.forEach(
           (item) => {
             const existingProduct =
@@ -298,9 +466,12 @@ import type {
                 item.name,
               );
   
-            const itemRevenue =
-              item.price *
-              item.quantity;
+            const recognisedRevenue =
+              roundCurrency(
+                item.price *
+                  item.quantity *
+                  recognisedRatio,
+              );
   
             if (existingProduct) {
               productTotals.set(
@@ -311,8 +482,10 @@ import type {
                     existingProduct.quantity +
                     item.quantity,
                   revenue:
-                    existingProduct.revenue +
-                    itemRevenue,
+                    roundCurrency(
+                      existingProduct.revenue +
+                        recognisedRevenue,
+                    ),
                 },
               );
   
@@ -326,7 +499,7 @@ import type {
                 quantity:
                   item.quantity,
                 revenue:
-                  itemRevenue,
+                  recognisedRevenue,
               },
             );
           },
@@ -361,40 +534,109 @@ import type {
         )
         .slice(0, 10);
   
+    const totalOrders =
+      nonVoidedOrders.length;
+  
     return {
       startDate:
         filters.startDate,
+  
       endDate:
         filters.endDate,
   
-      totalSales,
-      netSales,
-      vatCollected,
+      totalSales:
+        roundCurrency(
+          totalSales,
+        ),
   
-      vatSales,
-      nonVatSales,
+      netSales:
+        roundCurrency(
+          netSales,
+        ),
+  
+      vatCollected:
+        roundCurrency(
+          vatCollected,
+        ),
+  
+      originalGrossSales:
+        roundCurrency(
+          originalGrossSales,
+        ),
+  
+      refundedSales:
+        roundCurrency(
+          refundedSales,
+        ),
+  
+      refundedNetAmount:
+        roundCurrency(
+          refundedNetAmount,
+        ),
+  
+      vatReversed:
+        roundCurrency(
+          vatReversed,
+        ),
+  
+      voidedSales:
+        roundCurrency(
+          voidedSales,
+        ),
+  
+      vatSales:
+        roundCurrency(
+          vatSales,
+        ),
+  
+      nonVatSales:
+        roundCurrency(
+          nonVatSales,
+        ),
   
       vatOrders:
-        vatOrders.length,
-      nonVatOrders:
-        nonVatOrders.length,
+        vatEntries.length,
   
-      totalOrders:
-        filteredOrders.length,
+      nonVatOrders:
+        nonVatEntries.length,
+  
+      totalOrders,
+  
+      completedOrders:
+        completedEntries.length,
+  
+      partiallyRefundedOrders:
+        partiallyRefundedEntries.length,
+  
+      refundedOrders:
+        refundedEntries.length,
+  
+      voidedOrders:
+        voidedEntries.length,
   
       averageOrderValue:
-        filteredOrders.length > 0
-          ? totalSales /
-            filteredOrders.length
+        totalOrders > 0
+          ? roundCurrency(
+              totalSales /
+                totalOrders,
+            )
           : 0,
   
-      cashSales,
-      cardSales,
+      cashSales:
+        roundCurrency(
+          cashSales,
+        ),
+  
+      cardSales:
+        roundCurrency(
+          cardSales,
+        ),
   
       cashOrders:
-        cashOrders.length,
+        cashEntries.length,
+  
       cardOrders:
-        cardOrders.length,
+        cardEntries.length,
   
       takeawayOrders,
       eatInOrders,
