@@ -1,8 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useState,
+} from "react";
 
-import type { SavedOrder } from "@/lib/orderStorage";
+import type {
+  SavedOrder,
+} from "@/lib/orderStorage";
 
 import {
   calculateSalesSummary,
@@ -11,6 +16,7 @@ import {
   getWeekStartDateKey,
   type OrderTypeFilter,
   type PaymentFilter,
+  type TaxTypeFilter,
 } from "@/lib/salesReport";
 
 type SalesReportModalProps = {
@@ -25,34 +31,45 @@ type ReportPreset =
   | "This Month"
   | "Custom";
 
-const currencyFormatter = new Intl.NumberFormat(
-  "en-GB",
-  {
-    style: "currency",
-    currency: "GBP",
-  },
-);
+const currencyFormatter =
+  new Intl.NumberFormat(
+    "en-GB",
+    {
+      style: "currency",
+      currency: "GBP",
+    },
+  );
 
-const dateFormatter = new Intl.DateTimeFormat(
-  "en-GB",
-  {
-    dateStyle: "medium",
-  },
-);
+const dateFormatter =
+  new Intl.DateTimeFormat(
+    "en-GB",
+    {
+      dateStyle: "medium",
+    },
+  );
 
 const dateTimeFormatter =
-  new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  new Intl.DateTimeFormat(
+    "en-GB",
+    {
+      dateStyle: "medium",
+      timeStyle: "short",
+    },
+  );
 
-function formatDateKey(dateKey: string) {
+function formatDateKey(
+  dateKey: string,
+) {
   return dateFormatter.format(
-    new Date(`${dateKey}T12:00:00`),
+    new Date(
+      `${dateKey}T12:00:00`,
+    ),
   );
 }
 
-function escapeHtml(value: string) {
+function escapeHtml(
+  value: string,
+) {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -61,42 +78,82 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#039;");
 }
 
+function getTaxTypeLabel(
+  taxType: SavedOrder["taxType"],
+) {
+  return taxType === "VAT"
+    ? "VAT Sale"
+    : "Non-VAT Sale";
+}
+
 export function SalesReportModal({
   isOpen,
   orders,
   onClose,
 }: SalesReportModalProps) {
-  const today = getTodayDateKey();
+  const today =
+    getTodayDateKey();
 
-  const [reportPreset, setReportPreset] =
-    useState<ReportPreset>("Today");
+  const [
+    reportPreset,
+    setReportPreset,
+  ] = useState<ReportPreset>(
+    "Today",
+  );
 
-  const [startDate, setStartDate] =
-    useState(today);
+  const [
+    startDate,
+    setStartDate,
+  ] = useState(today);
 
-  const [endDate, setEndDate] =
-    useState(today);
+  const [
+    endDate,
+    setEndDate,
+  ] = useState(today);
 
-  const [paymentMethod, setPaymentMethod] =
-    useState<PaymentFilter>("All");
+  const [
+    paymentMethod,
+    setPaymentMethod,
+  ] =
+    useState<PaymentFilter>(
+      "All",
+    );
 
-  const [orderType, setOrderType] =
-    useState<OrderTypeFilter>("All");
+  const [
+    orderType,
+    setOrderType,
+  ] =
+    useState<OrderTypeFilter>(
+      "All",
+    );
+
+  const [
+    taxType,
+    setTaxType,
+  ] =
+    useState<TaxTypeFilter>(
+      "All",
+    );
 
   const summary = useMemo(
     () =>
-      calculateSalesSummary(orders, {
-        startDate,
-        endDate,
-        paymentMethod,
-        orderType,
-      }),
+      calculateSalesSummary(
+        orders,
+        {
+          startDate,
+          endDate,
+          paymentMethod,
+          orderType,
+          taxType,
+        },
+      ),
     [
       orders,
       startDate,
       endDate,
       paymentMethod,
       orderType,
+      taxType,
     ],
   );
 
@@ -107,39 +164,56 @@ export function SalesReportModal({
   const selectPreset = (
     preset: ReportPreset,
   ) => {
-    setReportPreset(preset);
+    setReportPreset(
+      preset,
+    );
 
-    if (preset === "Today") {
+    if (
+      preset === "Today"
+    ) {
       setStartDate(today);
       setEndDate(today);
       return;
     }
 
-    if (preset === "This Week") {
-      setStartDate(getWeekStartDateKey());
+    if (
+      preset === "This Week"
+    ) {
+      setStartDate(
+        getWeekStartDateKey(),
+      );
       setEndDate(today);
       return;
     }
 
-    if (preset === "This Month") {
-      setStartDate(getMonthStartDateKey());
+    if (
+      preset === "This Month"
+    ) {
+      setStartDate(
+        getMonthStartDateKey(),
+      );
       setEndDate(today);
     }
   };
 
   const reportRangeLabel =
     startDate === endDate
-      ? formatDateKey(startDate)
+      ? formatDateKey(
+          startDate,
+        )
       : `${formatDateKey(
           startDate,
-        )} – ${formatDateKey(endDate)}`;
+        )} – ${formatDateKey(
+          endDate,
+        )}`;
 
   const printReport = () => {
-    const reportWindow = window.open(
-      "",
-      "_blank",
-      "width=980,height=800",
-    );
+    const reportWindow =
+      window.open(
+        "",
+        "_blank",
+        "width=1100,height=850",
+      );
 
     if (!reportWindow) {
       window.alert(
@@ -149,18 +223,31 @@ export function SalesReportModal({
     }
 
     const productRows =
-      summary.topProducts.length > 0
+      summary.topProducts
+        .length > 0
         ? summary.topProducts
             .map(
-              (product, index) => `
+              (
+                product,
+                index,
+              ) => `
                 <tr>
-                  <td>${index + 1}</td>
-                  <td>${escapeHtml(
-                    product.name,
-                  )}</td>
-                  <td class="right">
-                    ${product.quantity}
+                  <td>
+                    ${index + 1}
                   </td>
+
+                  <td>
+                    ${escapeHtml(
+                      product.name,
+                    )}
+                  </td>
+
+                  <td class="right">
+                    ${
+                      product.quantity
+                    }
+                  </td>
+
                   <td class="right">
                     ${currencyFormatter.format(
                       product.revenue,
@@ -172,35 +259,76 @@ export function SalesReportModal({
             .join("")
         : `
             <tr>
-              <td colspan="4" class="empty">
+              <td
+                colspan="4"
+                class="empty"
+              >
                 No product sales in this report.
               </td>
             </tr>
           `;
 
     const orderRows =
-      summary.filteredOrders.length > 0
+      summary.filteredOrders
+        .length > 0
         ? summary.filteredOrders
             .map(
               (order) => `
                 <tr>
-                  <td>${escapeHtml(
-                    order.orderNumber,
-                  )}</td>
-                  <td>${escapeHtml(
-                    dateTimeFormatter.format(
-                      new Date(order.createdAt),
-                    ),
-                  )}</td>
-                  <td>${escapeHtml(
-                    order.orderType,
-                  )}</td>
-                  <td>${escapeHtml(
-                    order.paymentMethod,
-                  )}</td>
-                  <td class="right">
-                    ${order.itemCount}
+                  <td>
+                    ${escapeHtml(
+                      order.orderNumber,
+                    )}
                   </td>
+
+                  <td>
+                    ${escapeHtml(
+                      dateTimeFormatter.format(
+                        new Date(
+                          order.createdAt,
+                        ),
+                      ),
+                    )}
+                  </td>
+
+                  <td>
+                    ${escapeHtml(
+                      order.orderType,
+                    )}
+                  </td>
+
+                  <td>
+                    ${escapeHtml(
+                      order.paymentMethod,
+                    )}
+                  </td>
+
+                  <td>
+                    ${escapeHtml(
+                      getTaxTypeLabel(
+                        order.taxType,
+                      ),
+                    )}
+                  </td>
+
+                  <td class="right">
+                    ${
+                      order.itemCount
+                    }
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      order.netAmount,
+                    )}
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      order.vatAmount,
+                    )}
+                  </td>
+
                   <td class="right">
                     ${currencyFormatter.format(
                       order.subtotal,
@@ -212,7 +340,10 @@ export function SalesReportModal({
             .join("")
         : `
             <tr>
-              <td colspan="6" class="empty">
+              <td
+                colspan="9"
+                class="empty"
+              >
                 No completed orders in this report.
               </td>
             </tr>
@@ -223,26 +354,42 @@ export function SalesReportModal({
       <html lang="en">
         <head>
           <meta charset="UTF-8" />
-          <title>Sales Report</title>
+
+          <title>
+            Sales Report
+          </title>
 
           <style>
-            * { box-sizing: border-box; }
+            * {
+              box-sizing:
+                border-box;
+            }
 
             body {
               margin: 0;
               padding: 28px;
               color: #0f172a;
-              font-family: Arial, Helvetica, sans-serif;
+              font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
             }
 
-            h1, h2, p { margin: 0; }
+            h1,
+            h2,
+            p {
+              margin: 0;
+            }
 
             .header {
               display: flex;
-              justify-content: space-between;
+              justify-content:
+                space-between;
               gap: 24px;
-              padding-bottom: 18px;
-              border-bottom: 2px solid #0f172a;
+              padding-bottom:
+                18px;
+              border-bottom:
+                2px solid #0f172a;
             }
 
             .brand {
@@ -250,7 +397,8 @@ export function SalesReportModal({
               font-size: 12px;
               font-weight: 800;
               letter-spacing: 2px;
-              text-transform: uppercase;
+              text-transform:
+                uppercase;
             }
 
             h1 {
@@ -267,7 +415,8 @@ export function SalesReportModal({
             .filters {
               margin-top: 16px;
               padding: 12px 14px;
-              border: 1px solid #cbd5e1;
+              border:
+                1px solid #cbd5e1;
               border-radius: 8px;
               background: #f8fafc;
               font-size: 12px;
@@ -275,14 +424,16 @@ export function SalesReportModal({
 
             .cards {
               display: grid;
-              grid-template-columns: repeat(4, 1fr);
+              grid-template-columns:
+                repeat(4, 1fr);
               gap: 12px;
               margin-top: 18px;
             }
 
             .card {
               padding: 14px;
-              border: 1px solid #cbd5e1;
+              border:
+                1px solid #cbd5e1;
               border-radius: 8px;
             }
 
@@ -297,7 +448,9 @@ export function SalesReportModal({
               font-size: 20px;
             }
 
-            .section { margin-top: 24px; }
+            .section {
+              margin-top: 24px;
+            }
 
             h2 {
               margin-bottom: 10px;
@@ -306,13 +459,16 @@ export function SalesReportModal({
 
             table {
               width: 100%;
-              border-collapse: collapse;
-              font-size: 11px;
+              border-collapse:
+                collapse;
+              font-size: 10px;
             }
 
-            th, td {
+            th,
+            td {
               padding: 8px;
-              border: 1px solid #cbd5e1;
+              border:
+                1px solid #cbd5e1;
               text-align: left;
               vertical-align: top;
             }
@@ -322,7 +478,9 @@ export function SalesReportModal({
               font-weight: 800;
             }
 
-            .right { text-align: right; }
+            .right {
+              text-align: right;
+            }
 
             .empty {
               padding: 20px;
@@ -333,16 +491,27 @@ export function SalesReportModal({
             .footer {
               margin-top: 24px;
               padding-top: 12px;
-              border-top: 1px solid #cbd5e1;
+              border-top:
+                1px solid #cbd5e1;
               color: #64748b;
               font-size: 10px;
               text-align: center;
             }
 
             @media print {
-              body { padding: 0; }
-              thead { display: table-header-group; }
-              tr { break-inside: avoid; }
+              body {
+                padding: 0;
+              }
+
+              thead {
+                display:
+                  table-header-group;
+              }
+
+              tr {
+                break-inside:
+                  avoid;
+              }
             }
           </style>
         </head>
@@ -350,15 +519,28 @@ export function SalesReportModal({
         <body>
           <header class="header">
             <div>
-              <p class="brand">Chicken Shop POS</p>
-              <h1>Sales Report</h1>
+              <p class="brand">
+                Chicken Shop POS
+              </p>
+
+              <h1>
+                Sales Report
+              </h1>
             </div>
 
             <div class="meta">
-              <strong>Main Branch</strong>
+              <strong>
+                Main Branch
+              </strong>
+
               <br />
-              ${escapeHtml(reportRangeLabel)}
+
+              ${escapeHtml(
+                reportRangeLabel,
+              )}
+
               <br />
+
               Printed:
               ${escapeHtml(
                 dateTimeFormatter.format(
@@ -369,14 +551,37 @@ export function SalesReportModal({
           </header>
 
           <div class="filters">
-            <strong>Filters:</strong>
-            Payment: ${escapeHtml(paymentMethod)}
-            · Order type: ${escapeHtml(orderType)}
+            <strong>
+              Filters:
+            </strong>
+
+            Payment:
+            ${escapeHtml(
+              paymentMethod,
+            )}
+
+            · Order type:
+            ${escapeHtml(
+              orderType,
+            )}
+
+            · Tax type:
+            ${escapeHtml(
+              taxType === "All"
+                ? "All sales"
+                : taxType ===
+                    "VAT"
+                  ? "VAT Sales"
+                  : "Non-VAT Sales",
+            )}
           </div>
 
           <section class="cards">
             <div class="card">
-              <p>Total sales</p>
+              <p>
+                Gross sales
+              </p>
+
               <strong>
                 ${currencyFormatter.format(
                   summary.totalSales,
@@ -385,12 +590,70 @@ export function SalesReportModal({
             </div>
 
             <div class="card">
-              <p>Completed orders</p>
-              <strong>${summary.totalOrders}</strong>
+              <p>
+                Net sales
+              </p>
+
+              <strong>
+                ${currencyFormatter.format(
+                  summary.netSales,
+                )}
+              </strong>
             </div>
 
             <div class="card">
-              <p>Average order value</p>
+              <p>
+                VAT collected
+              </p>
+
+              <strong>
+                ${currencyFormatter.format(
+                  summary.vatCollected,
+                )}
+              </strong>
+            </div>
+
+            <div class="card">
+              <p>
+                Completed orders
+              </p>
+
+              <strong>
+                ${
+                  summary.totalOrders
+                }
+              </strong>
+            </div>
+
+            <div class="card">
+              <p>
+                VAT sales
+              </p>
+
+              <strong>
+                ${currencyFormatter.format(
+                  summary.vatSales,
+                )}
+              </strong>
+            </div>
+
+            <div class="card">
+              <p>
+                Non-VAT sales
+              </p>
+
+              <strong>
+                ${currencyFormatter.format(
+                  summary.nonVatSales,
+                )}
+              </strong>
+            </div>
+
+            <div class="card">
+              <p>
+                Average order
+              </p>
+
               <strong>
                 ${currencyFormatter.format(
                   summary.averageOrderValue,
@@ -399,29 +662,130 @@ export function SalesReportModal({
             </div>
 
             <div class="card">
-              <p>Items sold</p>
-              <strong>${summary.totalItems}</strong>
+              <p>
+                Items sold
+              </p>
+
+              <strong>
+                ${
+                  summary.totalItems
+                }
+              </strong>
             </div>
           </section>
 
           <section class="section">
-            <h2>Payment and order breakdown</h2>
+            <h2>
+              VAT breakdown
+            </h2>
 
             <table>
               <thead>
                 <tr>
-                  <th>Category</th>
-                  <th class="right">Orders</th>
-                  <th class="right">Sales</th>
+                  <th>
+                    Sale type
+                  </th>
+
+                  <th class="right">
+                    Orders
+                  </th>
+
+                  <th class="right">
+                    Gross sales
+                  </th>
+
+                  <th class="right">
+                    VAT collected
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
                 <tr>
-                  <td>Cash</td>
-                  <td class="right">
-                    ${summary.cashOrders}
+                  <td>
+                    VAT Sales
                   </td>
+
+                  <td class="right">
+                    ${
+                      summary.vatOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      summary.vatSales,
+                    )}
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      summary.vatCollected,
+                    )}
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    Non-VAT Sales
+                  </td>
+
+                  <td class="right">
+                    ${
+                      summary.nonVatOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      summary.nonVatSales,
+                    )}
+                  </td>
+
+                  <td class="right">
+                    ${currencyFormatter.format(
+                      0,
+                    )}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h2>
+              Payment and order breakdown
+            </h2>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>
+                    Category
+                  </th>
+
+                  <th class="right">
+                    Orders
+                  </th>
+
+                  <th class="right">
+                    Sales
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr>
+                  <td>
+                    Cash
+                  </td>
+
+                  <td class="right">
+                    ${
+                      summary.cashOrders
+                    }
+                  </td>
+
                   <td class="right">
                     ${currencyFormatter.format(
                       summary.cashSales,
@@ -430,10 +794,16 @@ export function SalesReportModal({
                 </tr>
 
                 <tr>
-                  <td>Card</td>
-                  <td class="right">
-                    ${summary.cardOrders}
+                  <td>
+                    Card
                   </td>
+
+                  <td class="right">
+                    ${
+                      summary.cardOrders
+                    }
+                  </td>
+
                   <td class="right">
                     ${currencyFormatter.format(
                       summary.cardSales,
@@ -442,65 +812,137 @@ export function SalesReportModal({
                 </tr>
 
                 <tr>
-                  <td>Takeaway</td>
-                  <td class="right">
-                    ${summary.takeawayOrders}
+                  <td>
+                    Takeaway
                   </td>
-                  <td class="right">—</td>
+
+                  <td class="right">
+                    ${
+                      summary.takeawayOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    —
+                  </td>
                 </tr>
 
                 <tr>
-                  <td>Eat In</td>
-                  <td class="right">
-                    ${summary.eatInOrders}
+                  <td>
+                    Eat In
                   </td>
-                  <td class="right">—</td>
+
+                  <td class="right">
+                    ${
+                      summary.eatInOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    —
+                  </td>
                 </tr>
 
                 <tr>
-                  <td>Delivery</td>
-                  <td class="right">
-                    ${summary.deliveryOrders}
+                  <td>
+                    Delivery
                   </td>
-                  <td class="right">—</td>
+
+                  <td class="right">
+                    ${
+                      summary.deliveryOrders
+                    }
+                  </td>
+
+                  <td class="right">
+                    —
+                  </td>
                 </tr>
               </tbody>
             </table>
           </section>
 
           <section class="section">
-            <h2>Best-selling products</h2>
+            <h2>
+              Best-selling products
+            </h2>
 
             <table>
               <thead>
                 <tr>
-                  <th>#</th>
-                  <th>Product</th>
-                  <th class="right">Quantity</th>
-                  <th class="right">Revenue</th>
+                  <th>
+                    #
+                  </th>
+
+                  <th>
+                    Product
+                  </th>
+
+                  <th class="right">
+                    Quantity
+                  </th>
+
+                  <th class="right">
+                    Revenue
+                  </th>
                 </tr>
               </thead>
 
-              <tbody>${productRows}</tbody>
+              <tbody>
+                ${productRows}
+              </tbody>
             </table>
           </section>
 
           <section class="section">
-            <h2>Completed orders</h2>
+            <h2>
+              Completed orders
+            </h2>
 
             <table>
               <thead>
                 <tr>
-                  <th>Order</th>
-                  <th>Date and time</th>
-                  <th>Type</th>
-                  <th>Payment</th>
-                  <th class="right">Items</th>
-                  <th class="right">Total</th>
+                  <th>
+                    Order
+                  </th>
+
+                  <th>
+                    Date and time
+                  </th>
+
+                  <th>
+                    Type
+                  </th>
+
+                  <th>
+                    Payment
+                  </th>
+
+                  <th>
+                    Tax
+                  </th>
+
+                  <th class="right">
+                    Items
+                  </th>
+
+                  <th class="right">
+                    Net
+                  </th>
+
+                  <th class="right">
+                    VAT
+                  </th>
+
+                  <th class="right">
+                    Total
+                  </th>
                 </tr>
               </thead>
 
-              <tbody>${orderRows}</tbody>
+              <tbody>
+                ${orderRows}
+              </tbody>
             </table>
           </section>
 
@@ -572,25 +1014,30 @@ export function SalesReportModal({
                 "This Month",
                 "Custom",
               ] as ReportPreset[]
-            ).map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() =>
-                  selectPreset(preset)
-                }
-                className={`rounded-xl px-4 py-3 text-sm font-bold transition ${
-                  reportPreset === preset
-                    ? "bg-orange-500 text-white"
-                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                }`}
-              >
-                {preset}
-              </button>
-            ))}
+            ).map(
+              (preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() =>
+                    selectPreset(
+                      preset,
+                    )
+                  }
+                  className={`rounded-xl px-4 py-3 text-sm font-bold transition ${
+                    reportPreset ===
+                    preset
+                      ? "bg-orange-500 text-white"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  }`}
+                >
+                  {preset}
+                </button>
+              ),
+            )}
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <label className="text-sm font-bold text-slate-700">
               Start date
 
@@ -598,11 +1045,16 @@ export function SalesReportModal({
                 type="date"
                 value={startDate}
                 max={endDate}
-                onChange={(event) => {
+                onChange={(
+                  event,
+                ) => {
                   setStartDate(
-                    event.target.value,
+                    event.target
+                      .value,
                   );
-                  setReportPreset("Custom");
+                  setReportPreset(
+                    "Custom",
+                  );
                 }}
                 className="mt-2 block w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-orange-500"
               />
@@ -615,11 +1067,16 @@ export function SalesReportModal({
                 type="date"
                 value={endDate}
                 min={startDate}
-                onChange={(event) => {
+                onChange={(
+                  event,
+                ) => {
                   setEndDate(
-                    event.target.value,
+                    event.target
+                      .value,
                   );
-                  setReportPreset("Custom");
+                  setReportPreset(
+                    "Custom",
+                  );
                 }}
                 className="mt-2 block w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-orange-500"
               />
@@ -629,8 +1086,12 @@ export function SalesReportModal({
               Payment method
 
               <select
-                value={paymentMethod}
-                onChange={(event) =>
+                value={
+                  paymentMethod
+                }
+                onChange={(
+                  event,
+                ) =>
                   setPaymentMethod(
                     event.target
                       .value as PaymentFilter,
@@ -641,9 +1102,11 @@ export function SalesReportModal({
                 <option value="All">
                   All payments
                 </option>
+
                 <option value="Cash">
                   Cash
                 </option>
+
                 <option value="Card">
                   Card
                 </option>
@@ -655,7 +1118,9 @@ export function SalesReportModal({
 
               <select
                 value={orderType}
-                onChange={(event) =>
+                onChange={(
+                  event,
+                ) =>
                   setOrderType(
                     event.target
                       .value as OrderTypeFilter,
@@ -666,14 +1131,46 @@ export function SalesReportModal({
                 <option value="All">
                   All order types
                 </option>
+
                 <option value="Takeaway">
                   Takeaway
                 </option>
+
                 <option value="Eat In">
                   Eat In
                 </option>
+
                 <option value="Delivery">
                   Delivery
+                </option>
+              </select>
+            </label>
+
+            <label className="text-sm font-bold text-slate-700">
+              Tax type
+
+              <select
+                value={taxType}
+                onChange={(
+                  event,
+                ) =>
+                  setTaxType(
+                    event.target
+                      .value as TaxTypeFilter,
+                  )
+                }
+                className="mt-2 block w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-orange-500"
+              >
+                <option value="All">
+                  All sales
+                </option>
+
+                <option value="VAT">
+                  VAT sales
+                </option>
+
+                <option value="NON_VAT">
+                  Non-VAT sales
                 </option>
               </select>
             </label>
@@ -684,8 +1181,9 @@ export function SalesReportModal({
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <article className="rounded-2xl bg-slate-950 p-5 text-white">
               <p className="text-sm font-semibold text-slate-400">
-                Total sales
+                Gross sales
               </p>
+
               <p className="mt-3 text-3xl font-black">
                 {currencyFormatter.format(
                   summary.totalSales,
@@ -695,8 +1193,91 @@ export function SalesReportModal({
 
             <article className="rounded-2xl border border-slate-200 bg-white p-5">
               <p className="text-sm font-semibold text-slate-500">
+                Net sales
+              </p>
+
+              <p className="mt-3 text-3xl font-black">
+                {currencyFormatter.format(
+                  summary.netSales,
+                )}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-orange-200 bg-orange-50 p-5">
+              <p className="text-sm font-semibold text-orange-700">
+                VAT collected
+              </p>
+
+              <p className="mt-3 text-3xl font-black text-orange-900">
+                {currencyFormatter.format(
+                  summary.vatCollected,
+                )}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-slate-200 bg-white p-5">
+              <p className="text-sm font-semibold text-slate-500">
+                Orders
+              </p>
+
+              <p className="mt-3 text-3xl font-black">
+                {
+                  summary.totalOrders
+                }
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-green-200 bg-green-50 p-5">
+              <p className="text-sm font-semibold text-green-700">
+                VAT sales
+              </p>
+
+              <p className="mt-3 text-3xl font-black text-green-900">
+                {currencyFormatter.format(
+                  summary.vatSales,
+                )}
+              </p>
+
+              <p className="mt-2 text-sm font-semibold text-green-700">
+                {
+                  summary.vatOrders
+                }{" "}
+                order
+                {summary.vatOrders ===
+                1
+                  ? ""
+                  : "s"}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+              <p className="text-sm font-semibold text-blue-700">
+                Non-VAT sales
+              </p>
+
+              <p className="mt-3 text-3xl font-black text-blue-900">
+                {currencyFormatter.format(
+                  summary.nonVatSales,
+                )}
+              </p>
+
+              <p className="mt-2 text-sm font-semibold text-blue-700">
+                {
+                  summary.nonVatOrders
+                }{" "}
+                order
+                {summary.nonVatOrders ===
+                1
+                  ? ""
+                  : "s"}
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-slate-200 bg-white p-5">
+              <p className="text-sm font-semibold text-slate-500">
                 Average order value
               </p>
+
               <p className="mt-3 text-3xl font-black">
                 {currencyFormatter.format(
                   summary.averageOrderValue,
@@ -708,22 +1289,62 @@ export function SalesReportModal({
               <p className="text-sm font-semibold text-slate-500">
                 Items sold
               </p>
-              <p className="mt-3 text-3xl font-black">
-                {summary.totalItems}
-              </p>
-            </article>
 
-            <article className="rounded-2xl border border-slate-200 bg-white p-5">
-              <p className="text-sm font-semibold text-slate-500">
-                Orders
-              </p>
               <p className="mt-3 text-3xl font-black">
-                {summary.totalOrders}
+                {
+                  summary.totalItems
+                }
               </p>
             </article>
           </div>
 
-          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <div className="mt-5 grid gap-5 lg:grid-cols-3">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5">
+              <p className="text-sm font-bold uppercase tracking-wider text-orange-500">
+                Tax breakdown
+              </p>
+
+              <div className="mt-4 space-y-3">
+                <div className="rounded-xl bg-orange-50 p-4">
+                  <div className="flex justify-between gap-4">
+                    <span className="font-black">
+                      VAT sales
+                    </span>
+
+                    <span className="font-black text-orange-800">
+                      {currencyFormatter.format(
+                        summary.vatSales,
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex justify-between gap-4 text-sm font-semibold text-orange-700">
+                    <span>
+                      VAT collected
+                    </span>
+
+                    <span>
+                      {currencyFormatter.format(
+                        summary.vatCollected,
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex justify-between rounded-xl bg-slate-100 p-4">
+                  <span className="font-black">
+                    Non-VAT sales
+                  </span>
+
+                  <span className="font-black text-slate-800">
+                    {currencyFormatter.format(
+                      summary.nonVatSales,
+                    )}
+                  </span>
+                </div>
+              </div>
+            </section>
+
             <section className="rounded-2xl border border-slate-200 bg-white p-5">
               <p className="text-sm font-bold uppercase tracking-wider text-orange-500">
                 Payments
@@ -732,8 +1353,13 @@ export function SalesReportModal({
               <div className="mt-4 space-y-3">
                 <div className="flex justify-between rounded-xl bg-green-50 p-4">
                   <span className="font-black">
-                    Cash ({summary.cashOrders})
+                    Cash (
+                    {
+                      summary.cashOrders
+                    }
+                    )
                   </span>
+
                   <span className="font-black text-green-800">
                     {currencyFormatter.format(
                       summary.cashSales,
@@ -743,8 +1369,13 @@ export function SalesReportModal({
 
                 <div className="flex justify-between rounded-xl bg-blue-50 p-4">
                   <span className="font-black">
-                    Card ({summary.cardOrders})
+                    Card (
+                    {
+                      summary.cardOrders
+                    }
+                    )
                   </span>
+
                   <span className="font-black text-blue-800">
                     {currencyFormatter.format(
                       summary.cardSales,
@@ -764,8 +1395,11 @@ export function SalesReportModal({
                   <p className="text-sm text-slate-500">
                     Takeaway
                   </p>
+
                   <p className="mt-2 text-2xl font-black">
-                    {summary.takeawayOrders}
+                    {
+                      summary.takeawayOrders
+                    }
                   </p>
                 </div>
 
@@ -773,8 +1407,11 @@ export function SalesReportModal({
                   <p className="text-sm text-slate-500">
                     Eat In
                   </p>
+
                   <p className="mt-2 text-2xl font-black">
-                    {summary.eatInOrders}
+                    {
+                      summary.eatInOrders
+                    }
                   </p>
                 </div>
 
@@ -782,8 +1419,11 @@ export function SalesReportModal({
                   <p className="text-sm text-slate-500">
                     Delivery
                   </p>
+
                   <p className="mt-2 text-2xl font-black">
-                    {summary.deliveryOrders}
+                    {
+                      summary.deliveryOrders
+                    }
                   </p>
                 </div>
               </div>
@@ -795,28 +1435,42 @@ export function SalesReportModal({
               Best-selling products
             </p>
 
-            {summary.topProducts.length === 0 ? (
+            {summary.topProducts
+              .length === 0 ? (
               <p className="mt-5 rounded-xl bg-slate-100 p-8 text-center text-slate-500">
                 No matching sales.
               </p>
             ) : (
               <div className="mt-4 space-y-3">
                 {summary.topProducts.map(
-                  (product, index) => (
+                  (
+                    product,
+                    index,
+                  ) => (
                     <div
-                      key={product.name}
+                      key={
+                        product.name
+                      }
                       className="flex items-center gap-4 rounded-xl bg-slate-100 p-4"
                     >
                       <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 font-black text-white">
-                        {index + 1}
+                        {
+                          index + 1
+                        }
                       </span>
 
                       <div className="flex-1">
                         <p className="font-black">
-                          {product.name}
+                          {
+                            product.name
+                          }
                         </p>
+
                         <p className="text-sm text-slate-500">
-                          {product.quantity} sold
+                          {
+                            product.quantity
+                          }{" "}
+                          sold
                         </p>
                       </div>
 
@@ -840,24 +1494,41 @@ export function SalesReportModal({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm">
+              <table className="w-full min-w-[1120px] text-sm">
                 <thead className="bg-slate-100 text-left">
                   <tr>
                     <th className="px-5 py-3">
                       Order
                     </th>
+
                     <th className="px-5 py-3">
                       Date
                     </th>
+
                     <th className="px-5 py-3">
                       Type
                     </th>
+
                     <th className="px-5 py-3">
                       Payment
                     </th>
+
+                    <th className="px-5 py-3">
+                      Tax
+                    </th>
+
                     <th className="px-5 py-3 text-right">
                       Items
                     </th>
+
+                    <th className="px-5 py-3 text-right">
+                      Net
+                    </th>
+
+                    <th className="px-5 py-3 text-right">
+                      VAT
+                    </th>
+
                     <th className="px-5 py-3 text-right">
                       Total
                     </th>
@@ -865,11 +1536,11 @@ export function SalesReportModal({
                 </thead>
 
                 <tbody>
-                  {summary.filteredOrders.length ===
-                  0 ? (
+                  {summary.filteredOrders
+                    .length === 0 ? (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={9}
                         className="px-5 py-12 text-center text-slate-500"
                       >
                         No completed orders match these filters.
@@ -879,12 +1550,18 @@ export function SalesReportModal({
                     summary.filteredOrders.map(
                       (order) => (
                         <tr
-                          key={order.id}
+                          key={
+                            order.id
+                          }
                           className="border-t border-slate-200"
                         >
                           <td className="px-5 py-4 font-black">
-                            #{order.orderNumber}
+                            #
+                            {
+                              order.orderNumber
+                            }
                           </td>
+
                           <td className="px-5 py-4">
                             {dateTimeFormatter.format(
                               new Date(
@@ -892,15 +1569,52 @@ export function SalesReportModal({
                               ),
                             )}
                           </td>
+
                           <td className="px-5 py-4">
-                            {order.orderType}
+                            {
+                              order.orderType
+                            }
                           </td>
+
                           <td className="px-5 py-4">
-                            {order.paymentMethod}
+                            {
+                              order.paymentMethod
+                            }
                           </td>
+
+                          <td className="px-5 py-4">
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-bold ${
+                                order.taxType ===
+                                "VAT"
+                                  ? "bg-orange-100 text-orange-700"
+                                  : "bg-slate-200 text-slate-700"
+                              }`}
+                            >
+                              {getTaxTypeLabel(
+                                order.taxType,
+                              )}
+                            </span>
+                          </td>
+
                           <td className="px-5 py-4 text-right">
-                            {order.itemCount}
+                            {
+                              order.itemCount
+                            }
                           </td>
+
+                          <td className="px-5 py-4 text-right">
+                            {currencyFormatter.format(
+                              order.netAmount,
+                            )}
+                          </td>
+
+                          <td className="px-5 py-4 text-right">
+                            {currencyFormatter.format(
+                              order.vatAmount,
+                            )}
+                          </td>
+
                           <td className="px-5 py-4 text-right font-black">
                             {currencyFormatter.format(
                               order.subtotal,

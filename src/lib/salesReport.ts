@@ -10,11 +10,16 @@ import type {
     | "All"
     | SavedOrder["orderType"];
   
+  export type TaxTypeFilter =
+    | "All"
+    | SavedOrder["taxType"];
+  
   export type SalesReportFilters = {
     startDate: string;
     endDate: string;
     paymentMethod: PaymentFilter;
     orderType: OrderTypeFilter;
+    taxType: TaxTypeFilter;
   };
   
   export type ProductSales = {
@@ -26,16 +31,35 @@ import type {
   export type SalesSummary = {
     startDate: string;
     endDate: string;
+  
+    // Gross customer-facing sales total.
     totalSales: number;
+  
+    // Sales before VAT.
+    netSales: number;
+  
+    // VAT included in VAT sales.
+    vatCollected: number;
+  
+    vatSales: number;
+    nonVatSales: number;
+  
+    vatOrders: number;
+    nonVatOrders: number;
+  
     totalOrders: number;
     averageOrderValue: number;
+  
     cashSales: number;
     cardSales: number;
+  
     cashOrders: number;
     cardOrders: number;
+  
     takeawayOrders: number;
     eatInOrders: number;
     deliveryOrders: number;
+  
     totalItems: number;
     topProducts: ProductSales[];
     filteredOrders: SavedOrder[];
@@ -133,15 +157,67 @@ import type {
           order.orderType ===
             filters.orderType;
   
+        const matchesTaxType =
+          filters.taxType ===
+            "All" ||
+          order.taxType ===
+            filters.taxType;
+  
         return (
           isWithinDateRange &&
           matchesPayment &&
-          matchesOrderType
+          matchesOrderType &&
+          matchesTaxType
         );
       });
   
     const totalSales =
       filteredOrders.reduce(
+        (total, order) =>
+          total +
+          order.subtotal,
+        0,
+      );
+  
+    const netSales =
+      filteredOrders.reduce(
+        (total, order) =>
+          total +
+          order.netAmount,
+        0,
+      );
+  
+    const vatCollected =
+      filteredOrders.reduce(
+        (total, order) =>
+          total +
+          order.vatAmount,
+        0,
+      );
+  
+    const vatOrders =
+      filteredOrders.filter(
+        (order) =>
+          order.taxType === "VAT",
+      );
+  
+    const nonVatOrders =
+      filteredOrders.filter(
+        (order) =>
+          order.taxType ===
+          "NON_VAT",
+      );
+  
+    const vatSales =
+      vatOrders.reduce(
+        (total, order) =>
+          total +
+          order.subtotal,
+        0,
+      );
+  
+    const nonVatSales =
+      nonVatOrders.reduce(
         (total, order) =>
           total +
           order.subtotal,
@@ -263,7 +339,10 @@ import type {
         productTotals.values(),
       )
         .sort(
-          (firstProduct, secondProduct) => {
+          (
+            firstProduct,
+            secondProduct,
+          ) => {
             if (
               secondProduct.quantity !==
               firstProduct.quantity
@@ -287,25 +366,43 @@ import type {
         filters.startDate,
       endDate:
         filters.endDate,
+  
       totalSales,
+      netSales,
+      vatCollected,
+  
+      vatSales,
+      nonVatSales,
+  
+      vatOrders:
+        vatOrders.length,
+      nonVatOrders:
+        nonVatOrders.length,
+  
       totalOrders:
         filteredOrders.length,
+  
       averageOrderValue:
         filteredOrders.length > 0
           ? totalSales /
             filteredOrders.length
           : 0,
+  
       cashSales,
       cardSales,
+  
       cashOrders:
         cashOrders.length,
       cardOrders:
         cardOrders.length,
+  
       takeawayOrders,
       eatInOrders,
       deliveryOrders,
+  
       totalItems,
       topProducts,
       filteredOrders,
     };
   }
+  
