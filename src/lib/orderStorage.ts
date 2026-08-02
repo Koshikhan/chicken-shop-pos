@@ -1,93 +1,210 @@
-// Define the structure of an individual item in a saved order
+import type {
+  TaxType,
+} from "@/lib/tax";
+
+// Structure of an individual item
+// stored inside a completed order.
 export type SavedOrderItem = {
-    id: number; // Unique identifier for the item
-    name: string; // Name of the item
-    price: number; // Price of the item
-    quantity: number; // Quantity of the item in the order
+  id: number;
+  name: string;
+  price: number;
+  quantity: number;
+};
+
+// Structure of a completed order.
+export type SavedOrder = {
+  id: string;
+
+  orderNumber: string;
+
+  orderType:
+    | "Takeaway"
+    | "Eat In"
+    | "Delivery";
+
+  items: SavedOrderItem[];
+
+  itemCount: number;
+
+  // Final amount paid by the customer.
+  // Prices are treated as VAT-inclusive.
+  subtotal: number;
+
+  // VAT or non-VAT sale.
+  taxType: TaxType;
+
+  // Stored as a decimal:
+  // 0.2 means 20%.
+  vatRate: number;
+
+  // Order value before VAT.
+  netAmount: number;
+
+  // VAT contained within the subtotal.
+  vatAmount: number;
+
+  paymentMethod:
+    | "Cash"
+    | "Card";
+
+  amountReceived: number;
+
+  change: number;
+
+  status: "Completed";
+
+  createdAt: string;
+};
+
+const ORDER_STORAGE_KEY =
+  "chicken-shop-pos-orders";
+
+/*
+ * Older orders were saved before VAT fields
+ * were introduced. This type represents the
+ * older stored format.
+ */
+type LegacySavedOrder =
+  Omit<
+    SavedOrder,
+    | "taxType"
+    | "vatRate"
+    | "netAmount"
+    | "vatAmount"
+  > & {
+    taxType?: TaxType;
+    vatRate?: number;
+    netAmount?: number;
+    vatAmount?: number;
   };
-  
-  // Define the structure of a saved order
-  export type SavedOrder = {
-    id: string; // Unique identifier for the order
-    orderNumber: string; // Display order number (e.g., "A001")
-    orderType: "Takeaway" | "Eat In" | "Delivery"; // Type of order
-    items: SavedOrderItem[]; // List of items in the order
-    itemCount: number; // Total number of items in the order
-    subtotal: number; // Total cost of the order
-    paymentMethod: "Cash" | "Card"; // Payment method used
-    amountReceived: number; // Amount received from the customer
-    change: number; // Change given to the customer
-    status: "Completed"; // Status of the order (currently only "Completed")
-    createdAt: string; // Timestamp of when the order was created
+
+/*
+ * Adds safe tax defaults to older orders.
+ *
+ * Existing orders are treated as non-VAT
+ * because they were completed before tax
+ * selection was available.
+ */
+function normaliseOrder(
+  order: LegacySavedOrder,
+): SavedOrder {
+  const taxType =
+    order.taxType ?? "NON_VAT";
+
+  const vatRate =
+    typeof order.vatRate ===
+    "number"
+      ? order.vatRate
+      : 0;
+
+  const netAmount =
+    typeof order.netAmount ===
+    "number"
+      ? order.netAmount
+      : order.subtotal;
+
+  const vatAmount =
+    typeof order.vatAmount ===
+    "number"
+      ? order.vatAmount
+      : 0;
+
+  return {
+    ...order,
+    taxType,
+    vatRate,
+    netAmount,
+    vatAmount,
   };
-  
-  // Key used to store orders in localStorage
-  const ORDER_STORAGE_KEY = "chicken-shop-pos-orders";
-  
-  // Function to load saved orders from localStorage
-  export function loadOrders(): SavedOrder[] {
-    if (typeof window === "undefined") {
-      // Return an empty array if running in a non-browser environment
+}
+
+// Load completed orders from localStorage.
+export function loadOrders():
+  SavedOrder[] {
+  if (
+    typeof window === "undefined"
+  ) {
+    return [];
+  }
+
+  try {
+    const storedOrders =
+      window.localStorage.getItem(
+        ORDER_STORAGE_KEY,
+      );
+
+    if (!storedOrders) {
       return [];
     }
-  
-    try {
-      // Retrieve orders from localStorage
-      const storedOrders = window.localStorage.getItem(ORDER_STORAGE_KEY);
-  
-      if (!storedOrders) {
-        // Return an empty array if no orders are found
-        return [];
-      }
-  
-      // Parse the stored orders from JSON
-      const parsedOrders = JSON.parse(storedOrders);
-  
-      // Ensure the parsed data is an array
-      if (!Array.isArray(parsedOrders)) {
-        return [];
-      }
-  
-      return parsedOrders; // Return the parsed orders
-    } catch (error) {
-      // Log an error if something goes wrong during loading
-      console.error("Unable to load orders:", error);
+
+    const parsedOrders: unknown =
+      JSON.parse(storedOrders);
+
+    if (
+      !Array.isArray(parsedOrders)
+    ) {
       return [];
     }
+
+    return parsedOrders.map(
+      (order) =>
+        normaliseOrder(
+          order as LegacySavedOrder,
+        ),
+    );
+  } catch (error) {
+    console.error(
+      "Unable to load orders:",
+      error,
+    );
+
+    return [];
   }
-  
-  // Function to save orders to localStorage
-  export function saveOrders(orders: SavedOrder[]) {
-    if (typeof window === "undefined") {
-      // Do nothing if running in a non-browser environment
-      return;
-    }
-  
-    try {
-      // Save the orders as a JSON string in localStorage
-      window.localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(orders));
-    } catch (error) {
-      // Log an error if something goes wrong during saving
-      console.error("Unable to save orders:", error);
-    }
+}
+
+// Save completed orders to localStorage.
+export function saveOrders(
+  orders: SavedOrder[],
+) {
+  if (
+    typeof window === "undefined"
+  ) {
+    return;
   }
-  
-  // Function to add a new order to the saved orders
-  export function addOrder(order: SavedOrder) {
-    // Load the current orders from localStorage
-    const currentOrders = loadOrders();
-  
-    // Add the new order to the beginning of the orders array
-    const updatedOrders = [order, ...currentOrders];
-  
-    // Save the updated orders back to localStorage
-    saveOrders(updatedOrders);
-  
-    return updatedOrders; // Return the updated orders
+
+  try {
+    window.localStorage.setItem(
+      ORDER_STORAGE_KEY,
+      JSON.stringify(orders),
+    );
+  } catch (error) {
+    console.error(
+      "Unable to save orders:",
+      error,
+    );
   }
-  
-  // Function to create a unique order ID
-  export function createOrderId() {
-    // Generate a unique ID using the current timestamp and a random string
-    return `order-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }
+}
+
+// Add a newly completed order.
+export function addOrder(
+  order: SavedOrder,
+) {
+  const currentOrders =
+    loadOrders();
+
+  const updatedOrders = [
+    order,
+    ...currentOrders,
+  ];
+
+  saveOrders(updatedOrders);
+
+  return updatedOrders;
+}
+
+// Create a unique internal order ID.
+export function createOrderId() {
+  return `order-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}

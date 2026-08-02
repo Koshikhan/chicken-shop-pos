@@ -20,6 +20,10 @@ import {
 } from "@/components/PaymentModal";
 
 import {
+  SalesReportModal,
+} from "@/components/SalesReportModal";
+
+import {
   StaffLoginModal,
 } from "@/components/StaffLoginModal";
 
@@ -46,6 +50,11 @@ import {
   saveActiveStaff,
   type StaffMember,
 } from "@/lib/staffStorage";
+
+import {
+  calculateTaxBreakdown,
+  type TaxType,
+} from "@/lib/tax";
 
 const categories = [
   "All",
@@ -80,6 +89,9 @@ export default function Home() {
   const [orderType, setOrderType] =
     useState<OrderType>("Takeaway");
 
+  const [taxType, setTaxType] =
+    useState<TaxType>("VAT");
+
   const [products, setProducts] =
     useState<Product[]>(
       DEFAULT_PRODUCTS,
@@ -109,6 +121,11 @@ export default function Home() {
   const [
     isOrderHistoryOpen,
     setIsOrderHistoryOpen,
+  ] = useState(false);
+
+  const [
+    isSalesReportOpen,
+    setIsSalesReportOpen,
   ] = useState(false);
 
   const [
@@ -180,6 +197,9 @@ export default function Home() {
   const canManageMenu =
     activeStaff?.role === "Manager";
 
+  const canViewSalesReport =
+    activeStaff?.role === "Manager";
+
   const handleStaffLogin = (
     staff: StaffMember,
   ) => {
@@ -204,9 +224,11 @@ export default function Home() {
     clearActiveStaff();
     setActiveStaff(null);
     setCart([]);
+    setTaxType("VAT");
     setNotice("");
     setIsPaymentOpen(false);
     setIsOrderHistoryOpen(false);
+    setIsSalesReportOpen(false);
     setIsMenuManagementOpen(false);
     setIsStaffLoginOpen(true);
   };
@@ -303,6 +325,7 @@ export default function Home() {
 
   const clearOrder = () => {
     setCart([]);
+    setTaxType("VAT");
     setNotice("");
   };
 
@@ -318,6 +341,12 @@ export default function Home() {
       item.price * item.quantity,
     0,
   );
+
+  const taxBreakdown =
+    calculateTaxBreakdown(
+      subtotal,
+      taxType,
+    );
 
   const formattedOrderNumber =
     `A${String(orderNumber).padStart(
@@ -386,6 +415,13 @@ export default function Home() {
         ),
         itemCount,
         subtotal,
+        taxType,
+        vatRate:
+          taxBreakdown.vatRate,
+        netAmount:
+          taxBreakdown.netAmount,
+        vatAmount:
+          taxBreakdown.vatAmount,
         paymentMethod:
           payment.method,
         amountReceived:
@@ -417,6 +453,7 @@ export default function Home() {
     );
 
     setCart([]);
+    setTaxType("VAT");
 
     setOrderNumber(
       (currentNumber) =>
@@ -460,6 +497,18 @@ export default function Home() {
               className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-orange-600"
             >
               Manage Menu
+            </button>
+          )}
+
+          {canViewSalesReport && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsSalesReportOpen(true)
+              }
+              className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+            >
+              Sales Report
             </button>
           )}
 
@@ -578,6 +627,49 @@ export default function Home() {
             </div>
           </div>
 
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div>
+              <p className="text-sm font-black text-slate-950">
+                Sale type
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">
+                Select whether this order
+                includes VAT.
+              </p>
+            </div>
+
+            <div className="flex rounded-xl bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setTaxType("VAT")
+                }
+                className={`rounded-lg px-5 py-3 text-sm font-bold transition ${
+                  taxType === "VAT"
+                    ? "bg-orange-500 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white"
+                }`}
+              >
+                VAT Sale
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setTaxType("NON_VAT")
+                }
+                className={`rounded-lg px-5 py-3 text-sm font-bold transition ${
+                  taxType === "NON_VAT"
+                    ? "bg-slate-950 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white"
+                }`}
+              >
+                Non-VAT Sale
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 2xl:grid-cols-4">
             {filteredProducts.map(
               (product) => (
@@ -639,6 +731,12 @@ export default function Home() {
 
                 <p className="mt-1 text-sm font-semibold text-orange-600">
                   {orderType}
+                </p>
+
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  {taxType === "VAT"
+                    ? "VAT Sale"
+                    : "Non-VAT Sale"}
                 </p>
               </div>
 
@@ -752,6 +850,44 @@ export default function Home() {
                 <span>{itemCount}</span>
               </div>
 
+              {taxType === "VAT" ? (
+                <>
+                  <div className="flex justify-between text-sm font-semibold text-slate-600">
+                    <span>
+                      Net amount
+                    </span>
+
+                    <span>
+                      {currencyFormatter.format(
+                        taxBreakdown.netAmount,
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between text-sm font-semibold text-slate-600">
+                    <span>
+                      VAT at 20%
+                    </span>
+
+                    <span>
+                      {currencyFormatter.format(
+                        taxBreakdown.vatAmount,
+                      )}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-between text-sm font-semibold text-slate-600">
+                  <span>
+                    VAT
+                  </span>
+
+                  <span>
+                    Not charged
+                  </span>
+                </div>
+              )}
+
               <div className="flex justify-between text-2xl font-black">
                 <span>Total</span>
 
@@ -809,12 +945,30 @@ export default function Home() {
         }
       />
 
-      <PaymentModal
+      <SalesReportModal
+        isOpen={isSalesReportOpen}
+        orders={savedOrders}
+        onClose={() =>
+          setIsSalesReportOpen(false)
+        }
+      />
+
+<PaymentModal
         isOpen={isPaymentOpen}
         orderNumber={
           formattedOrderNumber
         }
         total={subtotal}
+        taxType={taxType}
+        netAmount={
+          taxBreakdown.netAmount
+        }
+        vatAmount={
+          taxBreakdown.vatAmount
+        }
+        vatRate={
+          taxBreakdown.vatRate
+        }
         onClose={() =>
           setIsPaymentOpen(false)
         }
