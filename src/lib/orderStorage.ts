@@ -26,6 +26,15 @@ export type SavedOrderAuditAction =
   | "ORDER_VOIDED"
   | "ORDER_REFUNDED";
 
+export type SavedOrderRefundItem = {
+  id: number;
+  name: string;
+  unitPrice: number;
+  quantity: number;
+  grossAmount: number;
+  restocked: boolean;
+};
+
 export type SavedOrderRefund = {
   id: string;
 
@@ -37,6 +46,10 @@ export type SavedOrderRefund = {
 
   // VAT contained in this refund.
   vatAmount: number;
+
+  // Item details are present for new item-level refunds.
+  // Older refunds may not contain this field.
+  items?: SavedOrderRefundItem[];
 
   reason: string;
 
@@ -130,11 +143,21 @@ export type VoidOrderInput = {
   createdAt?: string;
 };
 
+export type RefundOrderItemInput = {
+  id: number;
+  quantity: number;
+  restock: boolean;
+};
+
 export type RefundOrderInput = {
   orderId: string;
 
   // Gross amount to refund.
   amount: number;
+
+  // Optional for backwards compatibility.
+  // New refunds should provide item selections.
+  items?: RefundOrderItemInput[];
 
   reason: string;
 
@@ -559,6 +582,53 @@ export function getOrderFinancialSummary(
   };
 }
 
+
+export function getRefundedQuantityForItem(
+  order: SavedOrder,
+  itemId: number,
+) {
+  return (order.refunds ?? []).reduce(
+    (total, refund) =>
+      total +
+      (refund.items ?? [])
+        .filter(
+          (item) =>
+            item.id === itemId,
+        )
+        .reduce(
+          (itemTotal, item) =>
+            itemTotal +
+            item.quantity,
+          0,
+        ),
+    0,
+  );
+}
+
+export function getRemainingRefundableQuantity(
+  order: SavedOrder,
+  itemId: number,
+) {
+  const orderItem =
+    order.items.find(
+      (item) =>
+        item.id === itemId,
+    );
+
+  if (!orderItem) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    orderItem.quantity -
+      getRefundedQuantityForItem(
+        order,
+        itemId,
+      ),
+  );
+}
+
 export function getRemainingRefundableAmount(
   order: SavedOrder,
 ) {
@@ -711,6 +781,7 @@ function calculateRefundTax(
 export function refundOrder({
   orderId,
   amount,
+  items,
   reason,
   performedBy,
   createdAt,
@@ -766,6 +837,115 @@ export function refundOrder({
     );
   }
 
+  let refundItems:
+    SavedOrderRefundItem[] |
+    undefined;
+
+  if (items) {
+    if (items.length === 0) {
+      throw new Error(
+        "Select at least one item to refund.",
+      );
+    }
+
+    const selectedById =
+      new Map<number, RefundOrderItemInput>();
+
+    items.forEach((item) => {
+      if (
+        !Number.isInteger(
+          item.quantity,
+        ) ||
+        item.quantity <= 0
+      ) {
+        throw new Error(
+          "Refund quantities must be whole numbers greater than 0.",
+        );
+      }
+
+      if (selectedById.has(item.id)) {
+        throw new Error(
+          "A refund item was selected more than once.",
+        );
+      }
+
+      selectedById.set(
+        item.id,
+        item,
+      );
+    });
+
+    refundItems =
+      items.map((item) => {
+        const orderItem =
+          selectedOrder.items.find(
+            (candidate) =>
+              candidate.id ===
+              item.id,
+          );
+
+        if (!orderItem) {
+          throw new Error(
+            "A selected refund item is not part of this order.",
+          );
+        }
+
+        const remainingQuantity =
+          getRemainingRefundableQuantity(
+            selectedOrder,
+            item.id,
+          );
+
+        if (
+          item.quantity >
+          remainingQuantity
+        ) {
+          throw new Error(
+            `${orderItem.name} only has ${remainingQuantity} refundable item${remainingQuantity === 1 ? "" : "s"} remaining.`,
+          );
+        }
+
+        return {
+          id: orderItem.id,
+          name: orderItem.name,
+          unitPrice:
+            roundCurrency(
+              orderItem.price,
+            ),
+          quantity:
+            item.quantity,
+          grossAmount:
+            roundCurrency(
+              orderItem.price *
+                item.quantity,
+            ),
+          restocked:
+            item.restock,
+        };
+      });
+
+    const itemRefundAmount =
+      roundCurrency(
+        refundItems.reduce(
+          (total, item) =>
+            total +
+            item.grossAmount,
+          0,
+        ),
+      );
+
+    if (
+      Math.abs(
+        itemRefundAmount -
+          roundCurrency(amount),
+      ) >= 0.01
+    ) {
+      throw new Error(
+        "The selected item total does not match the refund amount.",
+      );
+    }
+  }
+
   const financialSummary =
     getOrderFinancialSummary(
       selectedOrder,
@@ -813,6 +993,12 @@ export function refundOrder({
         refundTax.netAmount,
       vatAmount:
         refundTax.vatAmount,
+      ...(refundItems
+        ? {
+            items:
+              refundItems,
+          }
+        : {}),
       reason:
         trimmedReason,
       performedBy,

@@ -7,7 +7,17 @@ import {
 } from "react";
 
 import {
+  addInventoryMovements,
+  createInventoryMovement,
+} from "@/lib/inventoryStorage";
+
+import type {
+  Product,
+} from "@/lib/menuStorage";
+
+import {
   getOrderFinancialSummary,
+  getRemainingRefundableQuantity,
   refundOrder,
   voidOrder,
   type SavedOrder,
@@ -20,9 +30,13 @@ import type {
 type OrderHistoryModalProps = {
   isOpen: boolean;
   orders: SavedOrder[];
+  products: Product[];
   activeStaff?: StaffMember | null;
   onOrdersChange?: (
     orders: SavedOrder[],
+  ) => void;
+  onProductsChange?: (
+    products: Product[],
   ) => void;
   onClose: () => void;
 };
@@ -35,6 +49,17 @@ type OrderAction =
   | "refund"
   | "void"
   | null;
+
+type RefundSelection = {
+  quantity: number;
+  restock: boolean;
+};
+
+type RefundSelections =
+  Record<
+    string,
+    RefundSelection
+  >;
 
 const currencyFormatter =
   new Intl.NumberFormat(
@@ -101,8 +126,10 @@ function getAuditActionLabel(
 export function OrderHistoryModal({
   isOpen,
   orders,
+  products,
   activeStaff,
   onOrdersChange,
+  onProductsChange,
   onClose,
 }: OrderHistoryModalProps) {
   const [
@@ -138,9 +165,12 @@ export function OrderHistoryModal({
   ] = useState("");
 
   const [
-    refundAmount,
-    setRefundAmount,
-  ] = useState("");
+    refundSelections,
+    setRefundSelections,
+  ] =
+    useState<RefundSelections>(
+      {},
+    );
 
   const [
     actionReason,
@@ -292,6 +322,84 @@ export function OrderHistoryModal({
         actionOrderId,
     ) ?? null;
 
+  const refundableItems =
+    actionOrder
+      ? actionOrder.items.map(
+          (item) => ({
+            ...item,
+            remainingQuantity:
+              getRemainingRefundableQuantity(
+                actionOrder,
+                item.id,
+              ),
+          }),
+        )
+      : [];
+
+  const selectedRefundItems =
+    refundableItems.flatMap(
+      (item) => {
+        const selection =
+          refundSelections[
+            String(
+              item.id,
+            )
+          ];
+
+        if (
+          !selection ||
+          selection.quantity <=
+            0
+        ) {
+          return [];
+        }
+
+        return [
+          {
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            quantity:
+              selection.quantity,
+            restock:
+              selection.restock,
+          },
+        ];
+      },
+    );
+
+  const selectedRefundAmount =
+    Math.round(
+      (
+        selectedRefundItems.reduce(
+          (total, item) =>
+            total +
+            item.price *
+              item.quantity,
+          0,
+        ) +
+        Number.EPSILON
+      ) * 100,
+    ) / 100;
+
+  const selectedRefundQuantity =
+    selectedRefundItems.reduce(
+      (total, item) =>
+        total +
+        item.quantity,
+      0,
+    );
+
+  const selectedRestockQuantity =
+    selectedRefundItems.reduce(
+      (total, item) =>
+        total +
+        (item.restock
+          ? item.quantity
+          : 0),
+      0,
+    );
+
   if (!isOpen) {
     return null;
   }
@@ -300,7 +408,9 @@ export function OrderHistoryModal({
     () => {
       setActionType(null);
       setActionOrderId("");
-      setRefundAmount("");
+      setRefundSelections(
+        {},
+      );
       setActionReason("");
       setActionError("");
     };
@@ -321,10 +431,19 @@ export function OrderHistoryModal({
   const openRefund = (
     order: SavedOrder,
   ) => {
-    const financial =
-      getOrderFinancialSummary(
-        order,
-      );
+    const selections:
+      RefundSelections = {};
+
+    order.items.forEach(
+      (item) => {
+        selections[
+          String(item.id)
+        ] = {
+          quantity: 0,
+          restock: false,
+        };
+      },
+    );
 
     setActionType(
       "refund",
@@ -332,10 +451,8 @@ export function OrderHistoryModal({
     setActionOrderId(
       order.id,
     );
-    setRefundAmount(
-      financial.remainingRefundableAmount.toFixed(
-        2,
-      ),
+    setRefundSelections(
+      selections,
     );
     setActionReason("");
     setActionError("");
@@ -352,6 +469,94 @@ export function OrderHistoryModal({
     setActionError("");
   };
 
+  const updateRefundQuantity = (
+    itemId: number,
+    nextQuantity: number,
+    maximum: number,
+  ) => {
+    const quantity =
+      Math.max(
+        0,
+        Math.min(
+          maximum,
+          Math.floor(
+            nextQuantity,
+          ),
+        ),
+      );
+
+    setRefundSelections(
+      (current) => ({
+        ...current,
+        [String(itemId)]: {
+          quantity,
+          restock:
+            current[
+              String(
+                itemId,
+              )
+            ]?.restock ??
+            false,
+        },
+      }),
+    );
+
+    setActionError("");
+  };
+
+  const toggleRefundRestock = (
+    itemId: number,
+    restock: boolean,
+  ) => {
+    setRefundSelections(
+      (current) => ({
+        ...current,
+        [String(itemId)]: {
+          quantity:
+            current[
+              String(
+                itemId,
+              )
+            ]?.quantity ??
+            0,
+          restock,
+        },
+      }),
+    );
+
+    setActionError("");
+  };
+
+  const selectAllRefundItems =
+    () => {
+      if (!actionOrder) {
+        return;
+      }
+
+      const selections:
+        RefundSelections = {};
+
+      actionOrder.items.forEach(
+        (item) => {
+          selections[
+            String(item.id)
+          ] = {
+            quantity:
+              getRemainingRefundableQuantity(
+                actionOrder,
+                item.id,
+              ),
+            restock: false,
+          };
+        },
+      );
+
+      setRefundSelections(
+        selections,
+      );
+      setActionError("");
+    };
+
   const handleRefund =
     () => {
       if (
@@ -365,14 +570,43 @@ export function OrderHistoryModal({
         return;
       }
 
+      if (
+        selectedRefundItems.length ===
+          0 ||
+        selectedRefundAmount <=
+          0
+      ) {
+        setActionError(
+          "Select at least one item to refund.",
+        );
+        return;
+      }
+
+      if (
+        !actionReason.trim()
+      ) {
+        setActionError(
+          "Enter a refund reason.",
+        );
+        return;
+      }
+
       try {
         const updatedOrders =
           refundOrder({
             orderId:
               actionOrder.id,
             amount:
-              Number(
-                refundAmount,
+              selectedRefundAmount,
+            items:
+              selectedRefundItems.map(
+                (item) => ({
+                  id: item.id,
+                  quantity:
+                    item.quantity,
+                  restock:
+                    item.restock,
+                }),
               ),
             reason:
               actionReason,
@@ -384,12 +618,142 @@ export function OrderHistoryModal({
             },
           });
 
+        const restoreByProductId =
+          new Map<number, number>();
+
+        selectedRefundItems
+          .filter(
+            (item) =>
+              item.restock,
+          )
+          .forEach(
+            (item) => {
+              restoreByProductId.set(
+                item.id,
+                (
+                  restoreByProductId.get(
+                    item.id,
+                  ) ?? 0
+                ) +
+                  item.quantity,
+              );
+            },
+          );
+
+        const restoredProducts =
+          products.map(
+            (product) => {
+              const quantityToRestore =
+                restoreByProductId.get(
+                  product.id,
+                ) ?? 0;
+
+              if (
+                !product.trackStock ||
+                quantityToRestore <=
+                  0
+              ) {
+                return product;
+              }
+
+              return {
+                ...product,
+                stockQuantity:
+                  product.stockQuantity +
+                  quantityToRestore,
+              };
+            },
+          );
+
+        const stockMovements =
+          selectedRefundItems.flatMap(
+            (item) => {
+              if (!item.restock) {
+                return [];
+              }
+
+              const previousProduct =
+                products.find(
+                  (product) =>
+                    product.id ===
+                    item.id,
+                );
+
+              const restoredProduct =
+                restoredProducts.find(
+                  (product) =>
+                    product.id ===
+                    item.id,
+                );
+
+              if (
+                !previousProduct ||
+                !restoredProduct ||
+                !previousProduct.trackStock
+              ) {
+                return [];
+              }
+
+              return [
+                createInventoryMovement(
+                  {
+                    productId:
+                      previousProduct.id,
+                    productName:
+                      previousProduct.name,
+                    type:
+                      "REFUND_RESTORE",
+                    quantityChange:
+                      item.quantity,
+                    previousStock:
+                      previousProduct.stockQuantity,
+                    newStock:
+                      restoredProduct.stockQuantity,
+                    note:
+                      `Returned to stock from refund on order #${actionOrder.orderNumber}. ${actionReason.trim()}`,
+                    orderId:
+                      actionOrder.id,
+                    orderNumber:
+                      actionOrder.orderNumber,
+                    performedBy: {
+                      name:
+                        activeStaff.name,
+                      role:
+                        activeStaff.role,
+                    },
+                  },
+                ),
+              ];
+            },
+          );
+
+        addInventoryMovements(
+          stockMovements,
+        );
+
+        if (
+          selectedRestockQuantity >
+          0
+        ) {
+          onProductsChange?.(
+            restoredProducts,
+          );
+        }
+
         publishOrders(
           updatedOrders,
         );
 
+        const restockMessage =
+          selectedRestockQuantity >
+          0
+            ? ` ${selectedRestockQuantity} returned unit${selectedRestockQuantity === 1 ? " was" : "s were"} restored to stock.`
+            : " No items were returned to sellable stock.";
+
         setNotice(
-          `Refund recorded for order #${actionOrder.orderNumber}.`,
+          `Refund of ${currencyFormatter.format(
+            selectedRefundAmount,
+          )} recorded for order #${actionOrder.orderNumber}.${restockMessage}`,
         );
 
         closeActionModal();
@@ -431,12 +795,118 @@ export function OrderHistoryModal({
             },
           });
 
+        const quantityByProductId =
+          new Map<number, number>();
+
+        actionOrder.items.forEach(
+          (item) => {
+            quantityByProductId.set(
+              item.id,
+              (
+                quantityByProductId.get(
+                  item.id,
+                ) ?? 0
+              ) + item.quantity,
+            );
+          },
+        );
+
+        const restoredProducts =
+          products.map(
+            (product) => {
+              const quantityToRestore =
+                quantityByProductId.get(
+                  product.id,
+                ) ?? 0;
+
+              if (
+                !product.trackStock ||
+                quantityToRestore <= 0
+              ) {
+                return product;
+              }
+
+              return {
+                ...product,
+                stockQuantity:
+                  product.stockQuantity +
+                  quantityToRestore,
+              };
+            },
+          );
+
+        const stockMovements =
+          actionOrder.items.flatMap(
+            (item) => {
+              const previousProduct =
+                products.find(
+                  (product) =>
+                    product.id ===
+                    item.id,
+                );
+
+              const restoredProduct =
+                restoredProducts.find(
+                  (product) =>
+                    product.id ===
+                    item.id,
+                );
+
+              if (
+                !previousProduct ||
+                !restoredProduct ||
+                !previousProduct.trackStock
+              ) {
+                return [];
+              }
+
+              return [
+                createInventoryMovement(
+                  {
+                    productId:
+                      previousProduct.id,
+                    productName:
+                      previousProduct.name,
+                    type:
+                      "VOID_RESTORE",
+                    quantityChange:
+                      item.quantity,
+                    previousStock:
+                      previousProduct.stockQuantity,
+                    newStock:
+                      restoredProduct.stockQuantity,
+                    note:
+                      `Stock restored after voiding order #${actionOrder.orderNumber}. ${actionReason.trim()}`,
+                    orderId:
+                      actionOrder.id,
+                    orderNumber:
+                      actionOrder.orderNumber,
+                    performedBy: {
+                      name:
+                        activeStaff.name,
+                      role:
+                        activeStaff.role,
+                    },
+                  },
+                ),
+              ];
+            },
+          );
+
+        addInventoryMovements(
+          stockMovements,
+        );
+
+        onProductsChange?.(
+          restoredProducts,
+        );
+
         publishOrders(
           updatedOrders,
         );
 
         setNotice(
-          `Order #${actionOrder.orderNumber} was voided.`,
+          `Order #${actionOrder.orderNumber} was voided and its tracked stock was restored.`,
         );
 
         closeActionModal();
@@ -1265,6 +1735,29 @@ export function OrderHistoryModal({
                                     }
                                   </p>
 
+                                  {(refund.items ?? []).length >
+                                    0 && (
+                                    <div className="mt-2 rounded-lg bg-purple-50 p-2 text-xs text-purple-900">
+                                      {(refund.items ?? []).map(
+                                        (item) => (
+                                          <p
+                                            key={`${refund.id}-${item.id}`}
+                                            className="mt-1 first:mt-0"
+                                          >
+                                            {item.quantity} × {item.name}
+                                            {" · "}
+                                            {currencyFormatter.format(
+                                              item.grossAmount,
+                                            )}
+                                            {item.restocked
+                                              ? " · Returned to stock"
+                                              : " · Not restocked"}
+                                          </p>
+                                        ),
+                                      )}
+                                    </div>
+                                  )}
+
                                   <p className="mt-1 text-xs text-slate-500">
                                     {
                                       refund
@@ -1423,7 +1916,7 @@ export function OrderHistoryModal({
                 : "Void order"
             }
           >
-            <section className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            <section className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm font-bold uppercase tracking-widest text-orange-500">
@@ -1460,54 +1953,199 @@ export function OrderHistoryModal({
               {actionType ===
                 "refund" && (
                 <div className="mt-5">
-                  <label className="text-sm font-black text-slate-700">
-                    Refund amount
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-black text-slate-700">
+                        Select items to refund
+                      </p>
 
-                    <input
-                      type="number"
-                      min="0.01"
-                      max={getOrderFinancialSummary(
-                        actionOrder,
-                      ).remainingRefundableAmount.toFixed(
-                        2,
-                      )}
-                      step="0.01"
-                      value={
-                        refundAmount
-                      }
-                      onChange={(
-                        event,
-                      ) =>
-                        setRefundAmount(
-                          event.target
-                            .value,
-                        )
-                      }
-                      className="mt-2 block w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-lg font-black outline-none focus:border-purple-500"
-                    />
-                  </label>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Choose the exact quantities being refunded. Only mark Return to stock when the item can be sold again.
+                      </p>
+                    </div>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRefundAmount(
+                    <button
+                      type="button"
+                      onClick={
+                        selectAllRefundItems
+                      }
+                      className="rounded-lg bg-purple-100 px-3 py-2 text-xs font-black text-purple-700 hover:bg-purple-200"
+                    >
+                      Select all remaining
+                    </button>
+                  </div>
+
+                  <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
+                    {refundableItems.map(
+                      (item) => {
+                        const selection =
+                          refundSelections[
+                            String(
+                              item.id,
+                            )
+                          ] ?? {
+                            quantity: 0,
+                            restock: false,
+                          };
+
+                        const unavailable =
+                          item.remainingQuantity <=
+                          0;
+
+                        return (
+                          <div
+                            key={item.id}
+                            className={`rounded-xl border p-3 ${
+                              unavailable
+                                ? "border-slate-200 bg-slate-100 opacity-60"
+                                : "border-slate-200 bg-white"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <p className="font-black">
+                                  {item.name}
+                                </p>
+
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {currencyFormatter.format(
+                                    item.price,
+                                  )} each
+                                  {" · "}
+                                  Bought {item.quantity}
+                                  {" · "}
+                                  {item.remainingQuantity} refundable
+                                </p>
+                              </div>
+
+                              <p className="font-black text-purple-700">
+                                {currencyFormatter.format(
+                                  item.price *
+                                    selection.quantity,
+                                )}
+                              </p>
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={
+                                    unavailable ||
+                                    selection.quantity <=
+                                      0
+                                  }
+                                  onClick={() =>
+                                    updateRefundQuantity(
+                                      item.id,
+                                      selection.quantity -
+                                        1,
+                                      item.remainingQuantity,
+                                    )
+                                  }
+                                  className="h-9 w-9 rounded-lg bg-slate-100 text-lg font-black hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  −
+                                </button>
+
+                                <span className="w-8 text-center font-black">
+                                  {selection.quantity}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  disabled={
+                                    unavailable ||
+                                    selection.quantity >=
+                                      item.remainingQuantity
+                                  }
+                                  onClick={() =>
+                                    updateRefundQuantity(
+                                      item.id,
+                                      selection.quantity +
+                                        1,
+                                      item.remainingQuantity,
+                                    )
+                                  }
+                                  className="h-9 w-9 rounded-lg bg-slate-950 text-lg font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                >
+                                  +
+                                </button>
+                              </div>
+
+                              <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    selection.restock
+                                  }
+                                  disabled={
+                                    unavailable ||
+                                    selection.quantity <=
+                                      0
+                                  }
+                                  onChange={(
+                                    event,
+                                  ) =>
+                                    toggleRefundRestock(
+                                      item.id,
+                                      event.target
+                                        .checked,
+                                    )
+                                  }
+                                  className="h-5 w-5 accent-green-600"
+                                />
+
+                                Return to stock
+                              </label>
+                            </div>
+                          </div>
+                        );
+                      },
+                    )}
+                  </div>
+
+                  <div className="mt-4 rounded-xl bg-purple-50 p-4">
+                    <div className="flex justify-between gap-4 text-sm font-semibold text-purple-800">
+                      <span>
+                        Selected items
+                      </span>
+
+                      <span>
+                        {selectedRefundQuantity}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex justify-between gap-4 text-sm font-semibold text-purple-800">
+                      <span>
+                        Returning to stock
+                      </span>
+
+                      <span>
+                        {selectedRestockQuantity}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex justify-between gap-4 border-t border-purple-200 pt-3 text-lg font-black text-purple-950">
+                      <span>
+                        Refund total
+                      </span>
+
+                      <span>
+                        {currencyFormatter.format(
+                          selectedRefundAmount,
+                        )}
+                      </span>
+                    </div>
+
+                    <p className="mt-2 text-xs font-semibold text-purple-700">
+                      Maximum remaining refund: {currencyFormatter.format(
                         getOrderFinancialSummary(
                           actionOrder,
-                        ).remainingRefundableAmount.toFixed(
-                          2,
-                        ),
-                      )
-                    }
-                    className="mt-2 text-sm font-bold text-purple-700 hover:text-purple-900"
-                  >
-                    Refund full
-                    remaining amount:{" "}
-                    {currencyFormatter.format(
-                      getOrderFinancialSummary(
-                        actionOrder,
-                      ).remainingRefundableAmount,
-                    )}
-                  </button>
+                        ).remainingRefundableAmount,
+                      )}
+                    </p>
+                  </div>
                 </div>
               )}
 

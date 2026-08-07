@@ -7,6 +7,10 @@ import {
 } from "react";
 
 import {
+  InventoryManagementModal,
+} from "@/components/InventoryManagementModal";
+
+import {
   MenuManagementModal,
 } from "@/components/MenuManagementModal";
 
@@ -28,10 +32,19 @@ import {
 } from "@/components/StaffLoginModal";
 
 import {
+  addInventoryMovements,
+  createInventoryMovement,
+} from "@/lib/inventoryStorage";
+
+import {
   DEFAULT_PRODUCTS,
+  deductStockForItems,
+  getProductStockStatus,
+  isProductSellable,
   loadMenu,
   menuCategories,
   saveMenu,
+  validateStockForItems,
   type Category,
   type Product,
 } from "@/lib/menuStorage";
@@ -70,38 +83,65 @@ type OrderType =
   | "Eat In"
   | "Delivery";
 
-type CartItem = Product & {
-  quantity: number;
-};
+type CartItem =
+  Product & {
+    quantity: number;
+  };
 
 const currencyFormatter =
-  new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-  });
+  new Intl.NumberFormat(
+    "en-GB",
+    {
+      style: "currency",
+      currency: "GBP",
+    },
+  );
 
 export default function Home() {
   const [
     selectedCategory,
     setSelectedCategory,
-  ] = useState<SelectedCategory>("All");
+  ] =
+    useState<SelectedCategory>(
+      "All",
+    );
 
-  const [orderType, setOrderType] =
-    useState<OrderType>("Takeaway");
+  const [
+    orderType,
+    setOrderType,
+  ] =
+    useState<OrderType>(
+      "Takeaway",
+    );
 
-  const [taxType, setTaxType] =
-    useState<TaxType>("VAT");
+  const [
+    taxType,
+    setTaxType,
+  ] =
+    useState<TaxType>(
+      "VAT",
+    );
 
-  const [products, setProducts] =
+  const [
+    products,
+    setProducts,
+  ] =
     useState<Product[]>(
       DEFAULT_PRODUCTS,
     );
 
-  const [cart, setCart] =
-    useState<CartItem[]>([]);
+  const [
+    cart,
+    setCart,
+  ] =
+    useState<CartItem[]>(
+      [],
+    );
 
-  const [notice, setNotice] =
-    useState("");
+  const [
+    notice,
+    setNotice,
+  ] = useState("");
 
   const [
     isPaymentOpen,
@@ -116,7 +156,10 @@ export default function Home() {
   const [
     savedOrders,
     setSavedOrders,
-  ] = useState<SavedOrder[]>([]);
+  ] =
+    useState<SavedOrder[]>(
+      [],
+    );
 
   const [
     isOrderHistoryOpen,
@@ -134,9 +177,17 @@ export default function Home() {
   ] = useState(false);
 
   const [
+    isInventoryManagementOpen,
+    setIsInventoryManagementOpen,
+  ] = useState(false);
+
+  const [
     activeStaff,
     setActiveStaff,
-  ] = useState<StaffMember | null>(null);
+  ] =
+    useState<StaffMember | null>(
+      null,
+    );
 
   const [
     isStaffLoginOpen,
@@ -147,10 +198,24 @@ export default function Home() {
     const storedStaff =
       loadActiveStaff();
 
-    setActiveStaff(storedStaff);
-    setIsStaffLoginOpen(!storedStaff);
+    setActiveStaff(
+      storedStaff,
+    );
 
-    setProducts(loadMenu());
+    setIsStaffLoginOpen(
+      !storedStaff,
+    );
+
+    const storedProducts =
+      loadMenu();
+
+    setProducts(
+      storedProducts,
+    );
+
+    saveMenu(
+      storedProducts,
+    );
 
     const existingOrders =
       loadOrders();
@@ -161,7 +226,10 @@ export default function Home() {
 
     const highestOrderNumber =
       existingOrders.reduce(
-        (highest, order) => {
+        (
+          highest,
+          order,
+        ) => {
           const number =
             Number.parseInt(
               order.orderNumber.replace(
@@ -172,7 +240,9 @@ export default function Home() {
             );
 
           if (
-            Number.isNaN(number)
+            Number.isNaN(
+              number,
+            )
           ) {
             return highest;
           }
@@ -191,51 +261,25 @@ export default function Home() {
   }, []);
 
   const canViewOrderHistory =
-    activeStaff?.role === "Supervisor" ||
-    activeStaff?.role === "Manager";
+    activeStaff?.role ===
+      "Supervisor" ||
+    activeStaff?.role ===
+      "Manager";
 
   const canManageMenu =
-    activeStaff?.role === "Manager";
+    activeStaff?.role ===
+    "Manager";
 
   const canViewSalesReport =
-    activeStaff?.role === "Manager";
-
-  const handleStaffLogin = (
-    staff: StaffMember,
-  ) => {
-    saveActiveStaff(staff);
-    setActiveStaff(staff);
-    setIsStaffLoginOpen(false);
-    setNotice(
-      `${staff.name} signed in as ${staff.role}.`,
-    );
-  };
-
-  const handleSwitchStaff = () => {
-    if (
-      cart.length > 0 &&
-      !window.confirm(
-        "Switching staff will clear the current order. Continue?",
-      )
-    ) {
-      return;
-    }
-
-    clearActiveStaff();
-    setActiveStaff(null);
-    setCart([]);
-    setTaxType("VAT");
-    setNotice("");
-    setIsPaymentOpen(false);
-    setIsOrderHistoryOpen(false);
-    setIsSalesReportOpen(false);
-    setIsMenuManagementOpen(false);
-    setIsStaffLoginOpen(true);
-  };
+    activeStaff?.role ===
+    "Manager";
 
   const filteredProducts =
     useMemo(() => {
-      if (selectedCategory === "All") {
+      if (
+        selectedCategory ===
+        "All"
+      ) {
         return products;
       }
 
@@ -244,103 +288,277 @@ export default function Home() {
           product.category ===
           selectedCategory,
       );
-    }, [products, selectedCategory]);
+    }, [
+      products,
+      selectedCategory,
+    ]);
+
+  const lowStockCount =
+    products.filter(
+      (product) => {
+        const status =
+          getProductStockStatus(
+            product,
+          );
+
+        return (
+          status ===
+            "LOW_STOCK" ||
+          status ===
+            "OUT_OF_STOCK"
+        );
+      },
+    ).length;
+
+  const handleStaffLogin = (
+    staff: StaffMember,
+  ) => {
+    saveActiveStaff(
+      staff,
+    );
+
+    setActiveStaff(
+      staff,
+    );
+
+    setIsStaffLoginOpen(
+      false,
+    );
+
+    setNotice(
+      `${staff.name} signed in as ${staff.role}.`,
+    );
+  };
+
+  const handleSwitchStaff =
+    () => {
+      if (
+        cart.length > 0 &&
+        !window.confirm(
+          "Switching staff will clear the current order. Continue?",
+        )
+      ) {
+        return;
+      }
+
+      clearActiveStaff();
+      setActiveStaff(null);
+      setCart([]);
+      setTaxType("VAT");
+      setNotice("");
+      setIsPaymentOpen(
+        false,
+      );
+      setIsOrderHistoryOpen(
+        false,
+      );
+      setIsSalesReportOpen(
+        false,
+      );
+      setIsMenuManagementOpen(
+        false,
+      );
+      setIsInventoryManagementOpen(
+        false,
+      );
+      setIsStaffLoginOpen(
+        true,
+      );
+    };
 
   const addProduct = (
     product: Product,
   ) => {
-    if (!product.available) {
+    if (
+      !isProductSellable(
+        product,
+      )
+    ) {
+      setNotice(
+        `${product.name} is not available.`,
+      );
+      return;
+    }
+
+    const currentCartItem =
+      cart.find(
+        (item) =>
+          item.id ===
+          product.id,
+      );
+
+    const nextQuantity =
+      (
+        currentCartItem?.quantity ??
+        0
+      ) + 1;
+
+    if (
+      product.trackStock &&
+      nextQuantity >
+        product.stockQuantity
+    ) {
+      setNotice(
+        `${product.name} only has ${product.stockQuantity} remaining.`,
+      );
       return;
     }
 
     setNotice("");
 
-    setCart((currentCart) => {
-      const existingItem =
-        currentCart.find(
-          (item) =>
-            item.id === product.id,
-        );
+    setCart(
+      (
+        currentCart,
+      ) => {
+        const existingItem =
+          currentCart.find(
+            (item) =>
+              item.id ===
+              product.id,
+          );
 
-      if (existingItem) {
-        return currentCart.map(
-          (item) =>
-            item.id === product.id
-              ? {
-                  ...item,
-                  quantity:
-                    item.quantity + 1,
-                }
-              : item,
-        );
-      }
+        if (
+          existingItem
+        ) {
+          return currentCart.map(
+            (item) =>
+              item.id ===
+              product.id
+                ? {
+                    ...item,
+                    quantity:
+                      item.quantity +
+                      1,
+                  }
+                : item,
+          );
+        }
 
-      return [
-        ...currentCart,
-        {
-          ...product,
-          quantity: 1,
-        },
-      ];
-    });
+        return [
+          ...currentCart,
+          {
+            ...product,
+            quantity: 1,
+          },
+        ];
+      },
+    );
   };
 
   const updateQuantity = (
     productId: number,
     change: number,
   ) => {
+    const product =
+      products.find(
+        (item) =>
+          item.id ===
+          productId,
+      );
+
+    const cartItem =
+      cart.find(
+        (item) =>
+          item.id ===
+          productId,
+      );
+
+    if (
+      !product ||
+      !cartItem
+    ) {
+      return;
+    }
+
+    const nextQuantity =
+      cartItem.quantity +
+      change;
+
+    if (
+      change > 0 &&
+      product.trackStock &&
+      nextQuantity >
+        product.stockQuantity
+    ) {
+      setNotice(
+        `${product.name} only has ${product.stockQuantity} remaining.`,
+      );
+      return;
+    }
+
     setNotice("");
 
-    setCart((currentCart) =>
-      currentCart
-        .map((item) =>
-          item.id === productId
-            ? {
-                ...item,
-                quantity:
-                  item.quantity +
-                  change,
-              }
-            : item,
-        )
-        .filter(
-          (item) =>
-            item.quantity > 0,
-        ),
+    setCart(
+      (
+        currentCart,
+      ) =>
+        currentCart
+          .map(
+            (item) =>
+              item.id ===
+              productId
+                ? {
+                    ...item,
+                    quantity:
+                      item.quantity +
+                      change,
+                  }
+                : item,
+          )
+          .filter(
+            (item) =>
+              item.quantity >
+              0,
+          ),
     );
   };
 
   const removeItem = (
     productId: number,
   ) => {
-    setCart((currentCart) =>
-      currentCart.filter(
-        (item) =>
-          item.id !== productId,
-      ),
+    setCart(
+      (
+        currentCart,
+      ) =>
+        currentCart.filter(
+          (item) =>
+            item.id !==
+            productId,
+        ),
     );
 
     setNotice("");
   };
 
-  const clearOrder = () => {
-    setCart([]);
-    setTaxType("VAT");
-    setNotice("");
-  };
+  const clearOrder =
+    () => {
+      setCart([]);
+      setTaxType("VAT");
+      setNotice("");
+    };
 
-  const itemCount = cart.reduce(
-    (total, item) =>
-      total + item.quantity,
-    0,
-  );
+  const itemCount =
+    cart.reduce(
+      (
+        total,
+        item,
+      ) =>
+        total +
+        item.quantity,
+      0,
+    );
 
-  const subtotal = cart.reduce(
-    (total, item) =>
-      total +
-      item.price * item.quantity,
-    0,
-  );
+  const subtotal =
+    cart.reduce(
+      (
+        total,
+        item,
+      ) =>
+        total +
+        item.price *
+          item.quantity,
+      0,
+    );
 
   const taxBreakdown =
     calculateTaxBreakdown(
@@ -349,70 +567,254 @@ export default function Home() {
     );
 
   const formattedOrderNumber =
-    `A${String(orderNumber).padStart(
+    `A${String(
+      orderNumber,
+    ).padStart(
       3,
       "0",
     )}`;
 
   const handleMenuSave = (
-    updatedProducts: Product[],
+    updatedProducts:
+      Product[],
   ) => {
-    setProducts(updatedProducts);
-    saveMenu(updatedProducts);
-
-    setCart((currentCart) =>
-      currentCart.flatMap(
-        (cartItem) => {
-          const updatedProduct =
-            updatedProducts.find(
+    const movements =
+      updatedProducts.flatMap(
+        (
+          updatedProduct,
+        ) => {
+          const previousProduct =
+            products.find(
               (product) =>
                 product.id ===
-                cartItem.id,
+                updatedProduct.id,
             );
 
           if (
-            !updatedProduct ||
-            !updatedProduct.available
+            !previousProduct ||
+            !updatedProduct.trackStock ||
+            previousProduct.stockQuantity ===
+              updatedProduct.stockQuantity
           ) {
             return [];
           }
 
           return [
-            {
-              ...updatedProduct,
-              quantity:
-                cartItem.quantity,
-            },
+            createInventoryMovement(
+              {
+                productId:
+                  updatedProduct.id,
+                productName:
+                  updatedProduct.name,
+                type:
+                  "CORRECTION",
+                quantityChange:
+                  updatedProduct.stockQuantity -
+                  previousProduct.stockQuantity,
+                previousStock:
+                  previousProduct.stockQuantity,
+                newStock:
+                  updatedProduct.stockQuantity,
+                note:
+                  "Stock changed in menu management.",
+                ...(activeStaff
+                  ? {
+                      performedBy:
+                        {
+                          name:
+                            activeStaff.name,
+                          role:
+                            activeStaff.role,
+                        },
+                    }
+                  : {}),
+              },
+            ),
           ];
         },
-      ),
+      );
+
+    addInventoryMovements(
+      movements,
+    );
+
+    setProducts(
+      updatedProducts,
+    );
+
+    saveMenu(
+      updatedProducts,
+    );
+
+    setCart(
+      (
+        currentCart,
+      ) =>
+        currentCart.flatMap(
+          (
+            cartItem,
+          ) => {
+            const updatedProduct =
+              updatedProducts.find(
+                (product) =>
+                  product.id ===
+                  cartItem.id,
+              );
+
+            if (
+              !updatedProduct ||
+              !isProductSellable(
+                updatedProduct,
+              )
+            ) {
+              return [];
+            }
+
+            const allowedQuantity =
+              updatedProduct.trackStock
+                ? Math.min(
+                    cartItem.quantity,
+                    updatedProduct.stockQuantity,
+                  )
+                : cartItem.quantity;
+
+            if (
+              allowedQuantity <=
+              0
+            ) {
+              return [];
+            }
+
+            return [
+              {
+                ...updatedProduct,
+                quantity:
+                  allowedQuantity,
+              },
+            ];
+          },
+        ),
     );
 
     setNotice(
-      "Menu changes saved successfully.",
+      "Menu and stock changes saved.",
     );
 
-    setIsMenuManagementOpen(false);
+    setIsMenuManagementOpen(
+      false,
+    );
+  };
+
+  const handleInventoryProductsChange = (
+    updatedProducts:
+      Product[],
+  ) => {
+    setProducts(
+      updatedProducts,
+    );
+
+    saveMenu(
+      updatedProducts,
+    );
+
+    setCart(
+      (
+        currentCart,
+      ) =>
+        currentCart.flatMap(
+          (
+            cartItem,
+          ) => {
+            const updatedProduct =
+              updatedProducts.find(
+                (product) =>
+                  product.id ===
+                  cartItem.id,
+              );
+
+            if (
+              !updatedProduct ||
+              !isProductSellable(
+                updatedProduct,
+              )
+            ) {
+              return [];
+            }
+
+            const allowedQuantity =
+              updatedProduct.trackStock
+                ? Math.min(
+                    cartItem.quantity,
+                    updatedProduct.stockQuantity,
+                  )
+                : cartItem.quantity;
+
+            if (
+              allowedQuantity <=
+              0
+            ) {
+              return [];
+            }
+
+            return [
+              {
+                ...updatedProduct,
+                quantity:
+                  allowedQuantity,
+              },
+            ];
+          },
+        ),
+    );
+
+    setNotice(
+      "Inventory updated successfully.",
+    );
   };
 
   const handlePaymentComplete = (
-    payment: CompletedPayment,
+    payment:
+      CompletedPayment,
   ) => {
-    const completedOrder: SavedOrder =
-      {
-        id: createOrderId(),
+    const stockError =
+      validateStockForItems(
+        products,
+        cart,
+      );
+
+    if (
+      stockError
+    ) {
+      setNotice(
+        stockError,
+      );
+
+      setIsPaymentOpen(
+        false,
+      );
+
+      return;
+    }
+
+    const completedOrder:
+      SavedOrder = {
+        id:
+          createOrderId(),
         orderNumber:
           formattedOrderNumber,
         orderType,
-        items: cart.map(
-          (item) => ({
-            id: item.id,
-            name: item.name,
-            price: item.price,
-            quantity:
-              item.quantity,
-          }),
-        ),
+        items:
+          cart.map(
+            (item) => ({
+              id: item.id,
+              name:
+                item.name,
+              price:
+                item.price,
+              quantity:
+                item.quantity,
+            }),
+          ),
         itemCount,
         subtotal,
         taxType,
@@ -426,8 +828,10 @@ export default function Home() {
           payment.method,
         amountReceived:
           payment.amountReceived,
-        change: payment.change,
-        status: "Completed",
+        change:
+          payment.change,
+        status:
+          "Completed",
         createdAt:
           new Date().toISOString(),
       };
@@ -437,40 +841,149 @@ export default function Home() {
         completedOrder,
       );
 
+    const updatedProducts =
+      deductStockForItems(
+        products,
+        cart,
+      );
+
+    const stockMovements =
+      cart.flatMap(
+        (
+          cartItem,
+        ) => {
+          const previousProduct =
+            products.find(
+              (product) =>
+                product.id ===
+                cartItem.id,
+            );
+
+          const updatedProduct =
+            updatedProducts.find(
+              (product) =>
+                product.id ===
+                cartItem.id,
+            );
+
+          if (
+            !previousProduct ||
+            !updatedProduct ||
+            !previousProduct.trackStock
+          ) {
+            return [];
+          }
+
+          return [
+            createInventoryMovement(
+              {
+                productId:
+                  previousProduct.id,
+                productName:
+                  previousProduct.name,
+                type:
+                  "SALE",
+                quantityChange:
+                  -cartItem.quantity,
+                previousStock:
+                  previousProduct.stockQuantity,
+                newStock:
+                  updatedProduct.stockQuantity,
+                note:
+                  `Sale ${formattedOrderNumber}`,
+                orderId:
+                  completedOrder.id,
+                orderNumber:
+                  completedOrder.orderNumber,
+                ...(activeStaff
+                  ? {
+                      performedBy:
+                        {
+                          name:
+                            activeStaff.name,
+                          role:
+                            activeStaff.role,
+                        },
+                    }
+                  : {}),
+              },
+            ),
+          ];
+        },
+      );
+
+    addInventoryMovements(
+      stockMovements,
+    );
+
+    saveMenu(
+      updatedProducts,
+    );
+
+    setProducts(
+      updatedProducts,
+    );
+
     setSavedOrders(
       updatedOrders,
     );
 
     const paymentMessage =
-      payment.method === "Cash"
+      payment.method ===
+      "Cash"
         ? `Cash payment completed. Change: ${currencyFormatter.format(
             payment.change,
           )}.`
         : "Card payment completed.";
 
     setNotice(
-      `Order #${formattedOrderNumber} completed. ${paymentMessage}`,
+      `Order #${formattedOrderNumber} completed. Stock updated. ${paymentMessage}`,
     );
 
     setCart([]);
     setTaxType("VAT");
 
     setOrderNumber(
-      (currentNumber) =>
-        currentNumber + 1,
+      (
+        currentNumber,
+      ) =>
+        currentNumber +
+        1,
     );
 
-    setIsPaymentOpen(false);
+    setIsPaymentOpen(
+      false,
+    );
   };
 
-  const completeOrder = () => {
-    if (cart.length === 0) {
-      return;
-    }
+  const completeOrder =
+    () => {
+      if (
+        cart.length === 0
+      ) {
+        return;
+      }
 
-    setNotice("");
-    setIsPaymentOpen(true);
-  };
+      const stockError =
+        validateStockForItems(
+          products,
+          cart,
+        );
+
+      if (
+        stockError
+      ) {
+        setNotice(
+          stockError,
+        );
+        return;
+      }
+
+      setNotice("");
+      setIsPaymentOpen(
+        true,
+      );
+    };
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
@@ -494,9 +1007,41 @@ export default function Home() {
                   true,
                 )
               }
-              className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-orange-600"
+              className="relative rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-orange-600"
             >
               Manage Menu
+
+              {lowStockCount >
+                0 && (
+                <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-black text-white">
+                  {
+                    lowStockCount
+                  }
+                </span>
+              )}
+            </button>
+          )}
+
+          {canManageMenu && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsInventoryManagementOpen(
+                  true,
+                )
+              }
+              className="relative rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+            >
+              Inventory
+
+              {lowStockCount >
+                0 && (
+                <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-black text-white">
+                  {
+                    lowStockCount
+                  }
+                </span>
+              )}
             </button>
           )}
 
@@ -504,7 +1049,9 @@ export default function Home() {
             <button
               type="button"
               onClick={() =>
-                setIsSalesReportOpen(true)
+                setIsSalesReportOpen(
+                  true,
+                )
               }
               className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
             >
@@ -516,7 +1063,9 @@ export default function Home() {
             <button
               type="button"
               onClick={() =>
-                setIsOrderHistoryOpen(true)
+                setIsOrderHistoryOpen(
+                  true,
+                )
               }
               className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
             >
@@ -526,7 +1075,9 @@ export default function Home() {
 
           <button
             type="button"
-            onClick={handleSwitchStaff}
+            onClick={
+              handleSwitchStaff
+            }
             className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
           >
             Switch Staff
@@ -547,7 +1098,8 @@ export default function Home() {
           <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-500 font-black">
             {activeStaff?.name
               .slice(0, 1)
-              .toUpperCase() ?? "?"}
+              .toUpperCase() ??
+              "?"}
           </div>
         </div>
       </header>
@@ -560,14 +1112,18 @@ export default function Home() {
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-1">
             {categories.map(
-              (category) => {
+              (
+                category,
+              ) => {
                 const isSelected =
                   category ===
                   selectedCategory;
 
                 return (
                   <button
-                    key={category}
+                    key={
+                      category
+                    }
                     type="button"
                     onClick={() =>
                       setSelectedCategory(
@@ -580,7 +1136,9 @@ export default function Home() {
                         : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                     }`}
                   >
-                    {category}
+                    {
+                      category
+                    }
                   </button>
                 );
               },
@@ -592,12 +1150,15 @@ export default function Home() {
           <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-slate-500">
-                Select products to add
-                them to the order
+                Select products
+                to add them to the
+                order
               </p>
 
               <h2 className="text-2xl font-black">
-                {selectedCategory}
+                {
+                  selectedCategory
+                }
               </h2>
             </div>
 
@@ -608,22 +1169,31 @@ export default function Home() {
                   "Eat In",
                   "Delivery",
                 ] as OrderType[]
-              ).map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() =>
-                    setOrderType(type)
-                  }
-                  className={`rounded-lg px-4 py-2 text-sm font-bold transition ${
-                    orderType === type
-                      ? "bg-slate-950 text-white"
-                      : "text-slate-500 hover:bg-slate-100"
-                  }`}
-                >
-                  {type}
-                </button>
-              ))}
+              ).map(
+                (
+                  type,
+                ) => (
+                  <button
+                    key={
+                      type
+                    }
+                    type="button"
+                    onClick={() =>
+                      setOrderType(
+                        type,
+                      )
+                    }
+                    className={`rounded-lg px-4 py-2 text-sm font-bold transition ${
+                      orderType ===
+                      type
+                        ? "bg-slate-950 text-white"
+                        : "text-slate-500 hover:bg-slate-100"
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ),
+              )}
             </div>
           </div>
 
@@ -634,8 +1204,9 @@ export default function Home() {
               </p>
 
               <p className="mt-1 text-xs text-slate-500">
-                Select whether this order
-                includes VAT.
+                Select whether
+                this order includes
+                VAT.
               </p>
             </div>
 
@@ -643,10 +1214,13 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() =>
-                  setTaxType("VAT")
+                  setTaxType(
+                    "VAT",
+                  )
                 }
                 className={`rounded-lg px-5 py-3 text-sm font-bold transition ${
-                  taxType === "VAT"
+                  taxType ===
+                  "VAT"
                     ? "bg-orange-500 text-white shadow-sm"
                     : "text-slate-600 hover:bg-white"
                 }`}
@@ -657,10 +1231,13 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() =>
-                  setTaxType("NON_VAT")
+                  setTaxType(
+                    "NON_VAT",
+                  )
                 }
                 className={`rounded-lg px-5 py-3 text-sm font-bold transition ${
-                  taxType === "NON_VAT"
+                  taxType ===
+                  "NON_VAT"
                     ? "bg-slate-950 text-white shadow-sm"
                     : "text-slate-600 hover:bg-white"
                 }`}
@@ -672,47 +1249,98 @@ export default function Home() {
 
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 2xl:grid-cols-4">
             {filteredProducts.map(
-              (product) => (
-                <button
-                  key={product.id}
-                  type="button"
-                  disabled={
-                    !product.available
-                  }
-                  onClick={() =>
-                    addProduct(product)
-                  }
-                  className={`relative min-h-48 rounded-2xl border p-5 text-left shadow-sm transition ${
-                    product.available
-                      ? "border-slate-200 bg-white hover:-translate-y-1 hover:border-orange-400 hover:shadow-lg"
-                      : "cursor-not-allowed border-slate-200 bg-slate-200 opacity-60"
-                  }`}
-                >
-                  {!product.available && (
-                    <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-1 text-xs font-bold text-white">
-                      Out of stock
-                    </span>
-                  )}
+              (
+                product,
+              ) => {
+                const stockStatus =
+                  getProductStockStatus(
+                    product,
+                  );
 
-                  <span className="block text-5xl">
-                    {product.emoji}
-                  </span>
+                const sellable =
+                  isProductSellable(
+                    product,
+                  );
 
-                  <h3 className="mt-4 font-black leading-tight">
-                    {product.name}
-                  </h3>
-
-                  <p className="mt-2 text-xs leading-5 text-slate-500">
-                    {product.description}
-                  </p>
-
-                  <p className="mt-3 text-lg font-black text-orange-600">
-                    {currencyFormatter.format(
-                      product.price,
+                return (
+                  <button
+                    key={
+                      product.id
+                    }
+                    type="button"
+                    disabled={
+                      !sellable
+                    }
+                    onClick={() =>
+                      addProduct(
+                        product,
+                      )
+                    }
+                    className={`relative min-h-48 rounded-2xl border p-5 text-left shadow-sm transition ${
+                      sellable
+                        ? "border-slate-200 bg-white hover:-translate-y-1 hover:border-orange-400 hover:shadow-lg"
+                        : "cursor-not-allowed border-slate-200 bg-slate-200 opacity-60"
+                    }`}
+                  >
+                    {!product.available && (
+                      <span className="absolute right-3 top-3 rounded-full bg-slate-700 px-2 py-1 text-xs font-bold text-white">
+                        Disabled
+                      </span>
                     )}
-                  </p>
-                </button>
-              ),
+
+                    {product.available &&
+                      stockStatus ===
+                        "OUT_OF_STOCK" && (
+                        <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-1 text-xs font-bold text-white">
+                          Out of stock
+                        </span>
+                      )}
+
+                    {product.available &&
+                      stockStatus ===
+                        "LOW_STOCK" && (
+                        <span className="absolute right-3 top-3 rounded-full bg-amber-500 px-2 py-1 text-xs font-bold text-white">
+                          Low:{" "}
+                          {
+                            product.stockQuantity
+                          }
+                        </span>
+                      )}
+
+                    <span className="block text-5xl">
+                      {
+                        product.emoji
+                      }
+                    </span>
+
+                    <h3 className="mt-4 font-black leading-tight">
+                      {
+                        product.name
+                      }
+                    </h3>
+
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      {
+                        product.description
+                      }
+                    </p>
+
+                    <div className="mt-3 flex items-end justify-between gap-3">
+                      <p className="text-lg font-black text-orange-600">
+                        {currencyFormatter.format(
+                          product.price,
+                        )}
+                      </p>
+
+                      <p className="text-xs font-bold text-slate-500">
+                        {product.trackStock
+                          ? `${product.stockQuantity} left`
+                          : "Not tracked"}
+                      </p>
+                    </div>
+                  </button>
+                );
+              },
             )}
           </div>
         </section>
@@ -726,15 +1354,21 @@ export default function Home() {
                 </p>
 
                 <h2 className="text-2xl font-black">
-                  Order #{formattedOrderNumber}
+                  Order #
+                  {
+                    formattedOrderNumber
+                  }
                 </h2>
 
                 <p className="mt-1 text-sm font-semibold text-orange-600">
-                  {orderType}
+                  {
+                    orderType
+                  }
                 </p>
 
                 <p className="mt-1 text-xs font-bold text-slate-500">
-                  {taxType === "VAT"
+                  {taxType ===
+                  "VAT"
                     ? "VAT Sale"
                     : "Non-VAT Sale"}
                 </p>
@@ -742,9 +1376,12 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={clearOrder}
+                onClick={
+                  clearOrder
+                }
                 disabled={
-                  cart.length === 0
+                  cart.length ===
+                  0
                 }
                 className="rounded-lg px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -754,103 +1391,154 @@ export default function Home() {
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {cart.length === 0 ? (
+            {cart.length ===
+            0 ? (
               <div className="flex h-full min-h-72 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center">
                 <span className="text-5xl">
                   🧾
                 </span>
 
                 <h3 className="mt-4 font-black">
-                  No products added
+                  No products
+                  added
                 </h3>
 
                 <p className="mt-2 text-sm text-slate-500">
-                  Select a product to
-                  start this order.
+                  Select a
+                  product to start
+                  this order.
                 </p>
               </div>
             ) : (
-              cart.map((item) => (
-                <article
-                  key={item.id}
-                  className="rounded-xl border border-slate-200 p-3"
-                >
-                  <div className="flex gap-3">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-2xl">
-                      {item.emoji}
-                    </div>
+              cart.map(
+                (
+                  item,
+                ) => {
+                  const currentProduct =
+                    products.find(
+                      (product) =>
+                        product.id ===
+                        item.id,
+                    );
 
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-bold leading-tight">
-                        {item.name}
-                      </h3>
+                  const reachedLimit =
+                    Boolean(
+                      currentProduct?.trackStock &&
+                      item.quantity >=
+                        currentProduct.stockQuantity,
+                    );
 
-                      <p className="mt-1 text-sm font-black text-orange-600">
-                        {currencyFormatter.format(
-                          item.price *
-                            item.quantity,
-                        )}
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        removeItem(
-                          item.id,
-                        )
+                  return (
+                    <article
+                      key={
+                        item.id
                       }
-                      className="h-8 w-8 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
-                      aria-label={`Remove ${item.name}`}
+                      className="rounded-xl border border-slate-200 p-3"
                     >
-                      ×
-                    </button>
-                  </div>
+                      <div className="flex gap-3">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-2xl">
+                          {
+                            item.emoji
+                          }
+                        </div>
 
-                  <div className="mt-3 flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateQuantity(
-                          item.id,
-                          -1,
-                        )
-                      }
-                      className="h-9 w-9 rounded-lg bg-slate-100 text-lg font-black hover:bg-slate-200"
-                    >
-                      −
-                    </button>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-bold leading-tight">
+                            {
+                              item.name
+                            }
+                          </h3>
 
-                    <span className="w-8 text-center font-black">
-                      {item.quantity}
-                    </span>
+                          <p className="mt-1 text-sm font-black text-orange-600">
+                            {currencyFormatter.format(
+                              item.price *
+                                item.quantity,
+                            )}
+                          </p>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateQuantity(
-                          item.id,
-                          1,
-                        )
-                      }
-                      className="h-9 w-9 rounded-lg bg-slate-950 text-lg font-black text-white hover:bg-slate-800"
-                    >
-                      +
-                    </button>
-                  </div>
-                </article>
-              ))
+                          {currentProduct?.trackStock && (
+                            <p className="mt-1 text-xs font-semibold text-slate-500">
+                              {
+                                currentProduct.stockQuantity
+                              }{" "}
+                              in stock
+                            </p>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeItem(
+                              item.id,
+                            )
+                          }
+                          className="h-8 w-8 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          aria-label={`Remove ${item.name}`}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateQuantity(
+                              item.id,
+                              -1,
+                            )
+                          }
+                          className="h-9 w-9 rounded-lg bg-slate-100 text-lg font-black hover:bg-slate-200"
+                        >
+                          −
+                        </button>
+
+                        <span className="w-8 text-center font-black">
+                          {
+                            item.quantity
+                          }
+                        </span>
+
+                        <button
+                          type="button"
+                          disabled={
+                            reachedLimit
+                          }
+                          onClick={() =>
+                            updateQuantity(
+                              item.id,
+                              1,
+                            )
+                          }
+                          className="h-9 w-9 rounded-lg bg-slate-950 text-lg font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </article>
+                  );
+                },
+              )
             )}
           </div>
 
           <div className="border-t border-slate-200 bg-slate-50 p-5">
             <div className="space-y-3">
               <div className="flex justify-between text-sm font-semibold text-slate-600">
-                <span>Items</span>
-                <span>{itemCount}</span>
+                <span>
+                  Items
+                </span>
+
+                <span>
+                  {
+                    itemCount
+                  }
+                </span>
               </div>
 
-              {taxType === "VAT" ? (
+              {taxType ===
+              "VAT" ? (
                 <>
                   <div className="flex justify-between text-sm font-semibold text-slate-600">
                     <span>
@@ -889,7 +1577,9 @@ export default function Home() {
               )}
 
               <div className="flex justify-between text-2xl font-black">
-                <span>Total</span>
+                <span>
+                  Total
+                </span>
 
                 <span>
                   {currencyFormatter.format(
@@ -901,16 +1591,21 @@ export default function Home() {
 
             {notice && (
               <p className="mt-4 rounded-lg bg-green-100 p-3 text-sm font-semibold text-green-800">
-                {notice}
+                {
+                  notice
+                }
               </p>
             )}
 
             <button
               type="button"
               disabled={
-                cart.length === 0
+                cart.length ===
+                0
               }
-              onClick={completeOrder}
+              onClick={
+                completeOrder
+              }
               className="mt-5 w-full rounded-xl bg-orange-500 px-5 py-4 text-lg font-black text-white shadow-lg transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
             >
               Pay{" "}
@@ -923,47 +1618,107 @@ export default function Home() {
       </div>
 
       <StaffLoginModal
-        isOpen={isStaffLoginOpen}
-        staffMembers={DEMO_STAFF}
-        onLogin={handleStaffLogin}
+        isOpen={
+          isStaffLoginOpen
+        }
+        staffMembers={
+          DEMO_STAFF
+        }
+        onLogin={
+          handleStaffLogin
+        }
+      />
+
+      <InventoryManagementModal
+        isOpen={
+          isInventoryManagementOpen
+        }
+        products={
+          products
+        }
+        activeStaff={
+          activeStaff
+        }
+        onProductsChange={
+          handleInventoryProductsChange
+        }
+        onClose={() =>
+          setIsInventoryManagementOpen(
+            false,
+          )
+        }
       />
 
       <MenuManagementModal
-        isOpen={isMenuManagementOpen}
-        products={products}
-        onClose={() =>
-          setIsMenuManagementOpen(false)
+        isOpen={
+          isMenuManagementOpen
         }
-        onSave={handleMenuSave}
+        products={
+          products
+        }
+        onClose={() =>
+          setIsMenuManagementOpen(
+            false,
+          )
+        }
+        onSave={
+          handleMenuSave
+        }
       />
 
-<OrderHistoryModal
-  isOpen={isOrderHistoryOpen}
-  orders={savedOrders}
-  activeStaff={activeStaff}
-  onOrdersChange={
-    setSavedOrders
-  }
-  onClose={() =>
-    setIsOrderHistoryOpen(false)
-  }
-/>
+      <OrderHistoryModal
+        isOpen={
+          isOrderHistoryOpen
+        }
+        orders={
+          savedOrders
+        }
+        products={
+          products
+        }
+        activeStaff={
+          activeStaff
+        }
+        onOrdersChange={
+          setSavedOrders
+        }
+        onProductsChange={
+          handleInventoryProductsChange
+        }
+        onClose={() =>
+          setIsOrderHistoryOpen(
+            false,
+          )
+        }
+      />
 
       <SalesReportModal
-        isOpen={isSalesReportOpen}
-        orders={savedOrders}
+        isOpen={
+          isSalesReportOpen
+        }
+        orders={
+          savedOrders
+        }
         onClose={() =>
-          setIsSalesReportOpen(false)
+          setIsSalesReportOpen(
+            false,
+          )
         }
       />
 
-<PaymentModal
-        isOpen={isPaymentOpen}
+      <PaymentModal
+        isOpen={
+          isPaymentOpen
+        }
         orderNumber={
           formattedOrderNumber
         }
-        total={subtotal}
-        taxType={taxType}
+        total={
+          subtotal
+        }
+        taxType={
+          taxType
+        }
         netAmount={
           taxBreakdown.netAmount
         }
@@ -974,7 +1729,9 @@ export default function Home() {
           taxBreakdown.vatRate
         }
         onClose={() =>
-          setIsPaymentOpen(false)
+          setIsPaymentOpen(
+            false,
+          )
         }
         onPaymentComplete={
           handlePaymentComplete
