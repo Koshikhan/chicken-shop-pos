@@ -32,6 +32,10 @@ import {
 } from "@/components/StaffLoginModal";
 
 import {
+  StaffManagementModal,
+} from "@/components/StaffManagementModal";
+
+import {
   addInventoryMovements,
   createInventoryMovement,
 } from "@/lib/inventoryStorage";
@@ -230,6 +234,11 @@ export default function Home() {
     isStaffLoginOpen,
     setIsStaffLoginOpen,
   ] = useState(true);
+
+  const [
+    isStaffManagementOpen,
+    setIsStaffManagementOpen,
+  ] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -502,6 +511,10 @@ export default function Home() {
     activeStaff?.role ===
     "Manager";
 
+  const canManageStaff =
+    activeStaff?.role ===
+    "Manager";
+
   const canViewSalesReport =
     activeStaff?.role ===
     "Manager";
@@ -562,6 +575,20 @@ export default function Home() {
     );
   };
 
+  const handleActiveStaffChange =
+    (
+      staff:
+        StaffMember,
+    ) => {
+      saveActiveStaff(
+        staff,
+      );
+
+      setActiveStaff(
+        staff,
+      );
+    };
+
   const handleSwitchStaff =
     () => {
       if (
@@ -591,6 +618,9 @@ export default function Home() {
         false,
       );
       setIsInventoryManagementOpen(
+        false,
+      );
+      setIsStaffManagementOpen(
         false,
       );
       setIsStaffLoginOpen(
@@ -1273,6 +1303,20 @@ export default function Home() {
             </button>
           )}
 
+          {canManageStaff && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsStaffManagementOpen(
+                  true,
+                )
+              }
+              className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+            >
+              Staff
+            </button>
+          )}
+
           {canViewSalesReport && (
             <button
               type="button"
@@ -1869,6 +1913,23 @@ export default function Home() {
         }
         onLogin={
           handleStaffLogin
+        }
+      />
+
+      <StaffManagementModal
+        isOpen={
+          isStaffManagementOpen
+        }
+        activeStaff={
+          activeStaff
+        }
+        onActiveStaffChange={
+          handleActiveStaffChange
+        }
+        onClose={() =>
+          setIsStaffManagementOpen(
+            false,
+          )
         }
       />
 
