@@ -5,48 +5,49 @@ import {
   useState,
 } from "react";
 
+import {
+  verifyCloudStaffPin,
+} from "@/lib/cloudStaff";
+
 import type {
   StaffMember,
 } from "@/lib/staffStorage";
 
 type StaffLoginModalProps = {
   isOpen: boolean;
-  staffMembers: StaffMember[];
+
   onLogin: (
     staff: StaffMember,
   ) => void;
 };
 
-const keypadValues = [
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-  "Clear",
-  "0",
-  "⌫",
+const keypadRows = [
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
 ] as const;
 
 export function StaffLoginModal({
   isOpen,
-  staffMembers,
   onLogin,
 }: StaffLoginModalProps) {
-  const [selectedStaffId, setSelectedStaffId] =
-    useState(
-      staffMembers[0]?.id ?? "",
-    );
-
-  const [pin, setPin] =
+  const [
+    pin,
+    setPin,
+  ] =
     useState("");
 
-  const [error, setError] =
+  const [
+    error,
+    setError,
+  ] =
     useState("");
+
+  const [
+    isChecking,
+    setIsChecking,
+  ] =
+    useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -55,207 +56,279 @@ export function StaffLoginModal({
 
     setPin("");
     setError("");
-  }, [isOpen, selectedStaffId]);
+    setIsChecking(
+      false,
+    );
+  }, [isOpen]);
 
   if (!isOpen) {
     return null;
   }
 
-  const selectedStaff =
-    staffMembers.find(
-      (staff) =>
-        staff.id === selectedStaffId,
-    ) ?? staffMembers[0];
-
-  const handleKeypadPress = (
-    value: string,
-  ) => {
-    setError("");
-
-    if (value === "Clear") {
-      setPin("");
-      return;
-    }
-
-    if (value === "⌫") {
-      setPin((currentPin) =>
-        currentPin.slice(0, -1),
-      );
-      return;
-    }
-
-    setPin((currentPin) => {
-      if (currentPin.length >= 6) {
-        return currentPin;
+  const submitPin =
+    async (
+      pinToCheck:
+        string,
+    ) => {
+      if (
+        pinToCheck.length !==
+        4 ||
+        isChecking
+      ) {
+        return;
       }
 
-      return `${currentPin}${value}`;
-    });
-  };
-
-  const submitLogin = () => {
-    if (!selectedStaff) {
-      setError(
-        "Please select a staff member.",
+      setIsChecking(
+        true,
       );
+
+      setError("");
+
+      try {
+        const staff =
+          await verifyCloudStaffPin(
+            pinToCheck,
+          );
+
+        if (!staff) {
+          setPin("");
+
+          setError(
+            "Incorrect or inactive staff PIN.",
+          );
+
+          return;
+        }
+
+        setPin("");
+
+        onLogin(
+          staff,
+        );
+      } catch (
+        verificationError
+      ) {
+        setPin("");
+
+        setError(
+          verificationError instanceof
+            Error
+            ? `Unable to verify PIN. ${verificationError.message}`
+            : "Unable to verify PIN with Supabase.",
+        );
+      } finally {
+        setIsChecking(
+          false,
+        );
+      }
+    };
+
+  const addDigit = (
+    digit: string,
+  ) => {
+    if (
+      isChecking ||
+      pin.length >= 4
+    ) {
       return;
     }
 
-    if (pin !== selectedStaff.pin) {
-      setError(
-        "Incorrect PIN. Please try again.",
+    const nextPin =
+      `${pin}${digit}`;
+
+    setPin(
+      nextPin,
+    );
+
+    setError("");
+
+    if (
+      nextPin.length === 4
+    ) {
+      void submitPin(
+        nextPin,
       );
+    }
+  };
+
+  const removeDigit =
+    () => {
+      if (isChecking) {
+        return;
+      }
+
+      setPin(
+        (current) =>
+          current.slice(
+            0,
+            -1,
+          ),
+      );
+
+      setError("");
+    };
+
+  const clearPin =
+    () => {
+      if (isChecking) {
+        return;
+      }
+
       setPin("");
-      return;
-    }
-
-    onLogin(selectedStaff);
-  };
+      setError("");
+    };
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950 p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label="Staff login"
+      aria-label="Staff PIN login"
     >
-      <section className="w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-        <div className="grid md:grid-cols-[1.1fr_0.9fr]">
-          <div className="border-b border-slate-200 p-7 md:border-b-0 md:border-r">
-            <p className="text-sm font-bold uppercase tracking-[0.25em] text-orange-500">
-              Chicken Shop POS
-            </p>
+      <section className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <header className="bg-slate-950 px-7 py-6 text-center text-white">
+          <p className="text-xs font-bold uppercase tracking-[0.3em] text-orange-400">
+            Chicken Shop POS
+          </p>
 
-            <h1 className="mt-2 text-3xl font-black text-slate-950">
-              Staff sign in
-            </h1>
+          <h2 className="mt-2 text-2xl font-black">
+            Staff Sign In
+          </h2>
 
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Select your staff account and enter your PIN.
-            </p>
+          <p className="mt-2 text-sm text-slate-400">
+            Enter your 4-digit
+            staff PIN.
+          </p>
+        </header>
 
-            <div className="mt-6 space-y-3">
-              {staffMembers.map(
-                (staff) => {
-                  const isSelected =
-                    staff.id ===
-                    selectedStaffId;
+        <div className="p-7">
+          <div className="flex justify-center gap-4">
+            {[0, 1, 2, 3].map(
+              (index) => (
+                <span
+                  key={index}
+                  className={`flex h-14 w-14 items-center justify-center rounded-2xl border-2 text-2xl font-black ${
+                    pin.length >
+                    index
+                      ? "border-orange-500 bg-orange-50 text-orange-600"
+                      : "border-slate-200 bg-slate-50 text-slate-300"
+                  }`}
+                >
+                  {pin.length >
+                  index
+                    ? "●"
+                    : "○"}
+                </span>
+              ),
+            )}
+          </div>
 
-                  return (
-                    <button
-                      key={staff.id}
-                      type="button"
-                      onClick={() =>
-                        setSelectedStaffId(
-                          staff.id,
-                        )
-                      }
-                      className={`flex w-full items-center justify-between rounded-2xl border-2 p-4 text-left transition ${
-                        isSelected
-                          ? "border-orange-500 bg-orange-50"
-                          : "border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-950 text-lg font-black text-white">
-                          {staff.name
-                            .slice(0, 1)
-                            .toUpperCase()}
-                        </div>
+          <div className="mt-7 space-y-3">
+            {keypadRows.map(
+              (
+                row,
+                rowIndex,
+              ) => (
+                <div
+                  key={
+                    rowIndex
+                  }
+                  className="grid grid-cols-3 gap-3"
+                >
+                  {row.map(
+                    (digit) => (
+                      <button
+                        key={
+                          digit
+                        }
+                        type="button"
+                        disabled={
+                          isChecking
+                        }
+                        onClick={() =>
+                          addDigit(
+                            digit,
+                          )
+                        }
+                        className="rounded-2xl bg-slate-100 py-5 text-2xl font-black text-slate-950 transition hover:bg-slate-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {
+                          digit
+                        }
+                      </button>
+                    ),
+                  )}
+                </div>
+              ),
+            )}
 
-                        <div>
-                          <p className="font-black text-slate-950">
-                            {staff.name}
-                          </p>
+            <div className="grid grid-cols-3 gap-3">
+              <button
+                type="button"
+                disabled={
+                  isChecking
+                }
+                onClick={
+                  clearPin
+                }
+                className="rounded-2xl bg-red-50 py-5 text-sm font-black text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+              >
+                Clear
+              </button>
 
-                          <p className="text-sm text-slate-500">
-                            {staff.role}
-                          </p>
-                        </div>
-                      </div>
+              <button
+                type="button"
+                disabled={
+                  isChecking
+                }
+                onClick={() =>
+                  addDigit(
+                    "0",
+                  )
+                }
+                className="rounded-2xl bg-slate-100 py-5 text-2xl font-black text-slate-950 transition hover:bg-slate-200 disabled:opacity-50"
+              >
+                0
+              </button>
 
-                      <span
-                        className={`h-5 w-5 rounded-full border-4 ${
-                          isSelected
-                            ? "border-orange-500 bg-white"
-                            : "border-slate-300"
-                        }`}
-                      />
-                    </button>
-                  );
-                },
-              )}
-            </div>
-
-            <div className="mt-6 rounded-2xl bg-slate-100 p-4 text-sm text-slate-600">
-              <p className="font-black text-slate-800">
-                Demo PINs
-              </p>
-              <p className="mt-1">
-                Manager 1234 · Supervisor 2468 · Cashier 1111
-              </p>
+              <button
+                type="button"
+                disabled={
+                  isChecking
+                }
+                onClick={
+                  removeDigit
+                }
+                className="rounded-2xl bg-slate-100 py-5 text-xl font-black text-slate-700 transition hover:bg-slate-200 disabled:opacity-50"
+                aria-label="Delete last PIN digit"
+              >
+                ←
+              </button>
             </div>
           </div>
 
-          <div className="p-7">
-            <p className="font-black text-slate-950">
-              Enter PIN for {selectedStaff?.name ?? "staff"}
+          {isChecking && (
+            <p className="mt-5 rounded-xl bg-blue-50 p-3 text-center text-sm font-bold text-blue-700">
+              Checking staff PIN
+              with Supabase...
             </p>
+          )}
 
-            <div className="mt-4 flex min-h-16 items-center justify-center gap-3 rounded-2xl bg-slate-100 px-4">
-              {Array.from({ length: 4 }).map(
-                (_, index) => (
-                  <span
-                    key={index}
-                    className={`h-4 w-4 rounded-full ${
-                      index < pin.length
-                        ? "bg-slate-950"
-                        : "bg-slate-300"
-                    }`}
-                  />
-                ),
-              )}
-            </div>
+          {error && (
+            <p className="mt-5 rounded-xl bg-red-50 p-3 text-center text-sm font-bold text-red-700">
+              {error}
+            </p>
+          )}
 
-            <div className="mt-5 grid grid-cols-3 gap-3">
-              {keypadValues.map(
-                (value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() =>
-                      handleKeypadPress(
-                        value,
-                      )
-                    }
-                    className={`min-h-16 rounded-2xl text-xl font-black transition active:scale-95 ${
-                      value === "Clear"
-                        ? "bg-red-100 text-red-700 hover:bg-red-200"
-                        : value === "⌫"
-                          ? "bg-orange-100 text-orange-700 hover:bg-orange-200"
-                          : "bg-slate-950 text-white hover:bg-slate-800"
-                    }`}
-                  >
-                    {value}
-                  </button>
-                ),
-              )}
-            </div>
-
-            {error && (
-              <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">
-                {error}
-              </p>
-            )}
-
-            <button
-              type="button"
-              onClick={submitLogin}
-              disabled={pin.length < 4}
-              className="mt-5 w-full rounded-2xl bg-orange-500 px-5 py-4 text-lg font-black text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              Sign in
-            </button>
+          <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-center">
+            <p className="text-xs font-semibold text-slate-500">
+              Staff PINs are
+              verified securely
+              against the active
+              branch. The PIN
+              itself is not stored
+              in this browser.
+            </p>
           </div>
         </div>
       </section>

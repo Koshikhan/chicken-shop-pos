@@ -49,6 +49,10 @@ import {
 } from "@/lib/cloudOrders";
 
 import {
+  validateCloudStaffSession,
+} from "@/lib/cloudStaff";
+
+import {
   DEFAULT_PRODUCTS,
   deductStockForItems,
   getProductStockStatus,
@@ -71,7 +75,6 @@ import {
 
 import {
   clearActiveStaff,
-  DEMO_STAFF,
   loadActiveStaff,
   saveActiveStaff,
   type StaffMember,
@@ -234,13 +237,71 @@ export default function Home() {
     const storedStaff =
       loadActiveStaff();
 
+    // Do not trust a cached operator until Supabase confirms
+    // that the staff account is still active.
     setActiveStaff(
-      storedStaff,
+      null,
     );
 
     setIsStaffLoginOpen(
-      !storedStaff,
+      true,
     );
+
+    if (storedStaff) {
+      const validateStoredStaff =
+        async () => {
+          try {
+            const cloudStaff =
+              await validateCloudStaffSession(
+                storedStaff.id,
+              );
+
+            if (cancelled) {
+              return;
+            }
+
+            if (!cloudStaff) {
+              clearActiveStaff();
+              setActiveStaff(
+                null,
+              );
+              setIsStaffLoginOpen(
+                true,
+              );
+              return;
+            }
+
+            saveActiveStaff(
+              cloudStaff,
+            );
+
+            setActiveStaff(
+              cloudStaff,
+            );
+
+            setIsStaffLoginOpen(
+              false,
+            );
+          } catch (error) {
+            console.error(
+              "Unable to validate cached staff session:",
+              error,
+            );
+
+            if (!cancelled) {
+              clearActiveStaff();
+              setActiveStaff(
+                null,
+              );
+              setIsStaffLoginOpen(
+                true,
+              );
+            }
+          }
+        };
+
+      void validateStoredStaff();
+    }
 
     // Keep the existing local menu available immediately.
     // This is our fallback if Supabase cannot be reached.
@@ -1805,9 +1866,6 @@ export default function Home() {
       <StaffLoginModal
         isOpen={
           isStaffLoginOpen
-        }
-        staffMembers={
-          DEMO_STAFF
         }
         onLogin={
           handleStaffLogin
