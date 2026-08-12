@@ -37,6 +37,18 @@ import {
 } from "@/lib/inventoryStorage";
 
 import {
+  loadCloudMenu,
+} from "@/lib/cloudMenu";
+
+import {
+  completeCloudSale,
+} from "@/lib/cloudSales";
+
+import {
+  loadCloudOrders,
+} from "@/lib/cloudOrders";
+
+import {
   DEFAULT_PRODUCTS,
   deductStockForItems,
   getProductStockStatus,
@@ -53,6 +65,7 @@ import {
   addOrder,
   createOrderId,
   loadOrders,
+  saveOrders,
   type SavedOrder,
 } from "@/lib/orderStorage";
 
@@ -131,6 +144,27 @@ export default function Home() {
     );
 
   const [
+    menuSource,
+    setMenuSource,
+  ] =
+    useState<
+      "CLOUD" | "LOCAL"
+    >("LOCAL");
+
+  const [
+    cloudLocationId,
+    setCloudLocationId,
+  ] =
+    useState<string | null>(
+      null,
+    );
+
+  const [
+    isMenuLoading,
+    setIsMenuLoading,
+  ] = useState(true);
+
+  const [
     cart,
     setCart,
   ] =
@@ -195,6 +229,8 @@ export default function Home() {
   ] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     const storedStaff =
       loadActiveStaff();
 
@@ -206,6 +242,8 @@ export default function Home() {
       !storedStaff,
     );
 
+    // Keep the existing local menu available immediately.
+    // This is our fallback if Supabase cannot be reached.
     const storedProducts =
       loadMenu();
 
@@ -213,8 +251,8 @@ export default function Home() {
       storedProducts,
     );
 
-    saveMenu(
-      storedProducts,
+    setMenuSource(
+      "LOCAL",
     );
 
     const existingOrders =
@@ -258,6 +296,139 @@ export default function Home() {
     setOrderNumber(
       highestOrderNumber + 1,
     );
+
+    const loadProductsFromCloud =
+      async () => {
+        try {
+          const cloudMenu =
+            await loadCloudMenu();
+
+          if (cancelled) {
+            return;
+          }
+
+          setProducts(
+            cloudMenu.products,
+          );
+
+          setCloudLocationId(
+            cloudMenu.locationId,
+          );
+
+          // Cache the most recent successful cloud menu locally.
+          // If Supabase is temporarily unavailable later,
+          // loadMenu() can still give us a usable fallback.
+          saveMenu(
+            cloudMenu.products,
+          );
+
+          setMenuSource(
+            "CLOUD",
+          );
+
+          try {
+            const cloudOrders =
+              await loadCloudOrders(
+                cloudMenu.products,
+              );
+
+            if (cancelled) {
+              return;
+            }
+
+            setSavedOrders(
+              cloudOrders,
+            );
+
+            // Keep a local cached copy only as a fallback.
+            // Supabase is now the authoritative Order History.
+            saveOrders(
+              cloudOrders,
+            );
+
+            const highestCloudOrderNumber =
+              cloudOrders.reduce(
+                (
+                  highest,
+                  order,
+                ) => {
+                  const number =
+                    Number.parseInt(
+                      order.orderNumber.replace(
+                        /\D/g,
+                        "",
+                      ),
+                      10,
+                    );
+
+                  if (
+                    Number.isNaN(
+                      number,
+                    )
+                  ) {
+                    return highest;
+                  }
+
+                  return Math.max(
+                    highest,
+                    number,
+                  );
+                },
+                0,
+              );
+
+            if (
+              highestCloudOrderNumber >
+              0
+            ) {
+              setOrderNumber(
+                highestCloudOrderNumber +
+                  1,
+              );
+            }
+          } catch (
+            orderError
+          ) {
+            console.error(
+              "Unable to load cloud order history. Using local cached orders:",
+              orderError,
+            );
+          }
+        } catch (error) {
+          console.error(
+            "Unable to load cloud menu. Using local fallback:",
+            error,
+          );
+
+          if (cancelled) {
+            return;
+          }
+
+          setProducts(
+            storedProducts,
+          );
+
+          setCloudLocationId(
+            null,
+          );
+
+          setMenuSource(
+            "LOCAL",
+          );
+        } finally {
+          if (!cancelled) {
+            setIsMenuLoading(
+              false,
+            );
+          }
+        }
+      };
+
+    void loadProductsFromCloud();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const canViewOrderHistory =
@@ -574,137 +745,6 @@ export default function Home() {
       "0",
     )}`;
 
-  const handleMenuSave = (
-    updatedProducts:
-      Product[],
-  ) => {
-    const movements =
-      updatedProducts.flatMap(
-        (
-          updatedProduct,
-        ) => {
-          const previousProduct =
-            products.find(
-              (product) =>
-                product.id ===
-                updatedProduct.id,
-            );
-
-          if (
-            !previousProduct ||
-            !updatedProduct.trackStock ||
-            previousProduct.stockQuantity ===
-              updatedProduct.stockQuantity
-          ) {
-            return [];
-          }
-
-          return [
-            createInventoryMovement(
-              {
-                productId:
-                  updatedProduct.id,
-                productName:
-                  updatedProduct.name,
-                type:
-                  "CORRECTION",
-                quantityChange:
-                  updatedProduct.stockQuantity -
-                  previousProduct.stockQuantity,
-                previousStock:
-                  previousProduct.stockQuantity,
-                newStock:
-                  updatedProduct.stockQuantity,
-                note:
-                  "Stock changed in menu management.",
-                ...(activeStaff
-                  ? {
-                      performedBy:
-                        {
-                          name:
-                            activeStaff.name,
-                          role:
-                            activeStaff.role,
-                        },
-                    }
-                  : {}),
-              },
-            ),
-          ];
-        },
-      );
-
-    addInventoryMovements(
-      movements,
-    );
-
-    setProducts(
-      updatedProducts,
-    );
-
-    saveMenu(
-      updatedProducts,
-    );
-
-    setCart(
-      (
-        currentCart,
-      ) =>
-        currentCart.flatMap(
-          (
-            cartItem,
-          ) => {
-            const updatedProduct =
-              updatedProducts.find(
-                (product) =>
-                  product.id ===
-                  cartItem.id,
-              );
-
-            if (
-              !updatedProduct ||
-              !isProductSellable(
-                updatedProduct,
-              )
-            ) {
-              return [];
-            }
-
-            const allowedQuantity =
-              updatedProduct.trackStock
-                ? Math.min(
-                    cartItem.quantity,
-                    updatedProduct.stockQuantity,
-                  )
-                : cartItem.quantity;
-
-            if (
-              allowedQuantity <=
-              0
-            ) {
-              return [];
-            }
-
-            return [
-              {
-                ...updatedProduct,
-                quantity:
-                  allowedQuantity,
-              },
-            ];
-          },
-        ),
-    );
-
-    setNotice(
-      "Menu and stock changes saved.",
-    );
-
-    setIsMenuManagementOpen(
-      false,
-    );
-  };
-
   const handleInventoryProductsChange = (
     updatedProducts:
       Product[],
@@ -772,7 +812,7 @@ export default function Home() {
     );
   };
 
-  const handlePaymentComplete = (
+  const handlePaymentComplete = async (
     payment:
       CompletedPayment,
   ) => {
@@ -796,12 +836,115 @@ export default function Home() {
       return;
     }
 
+    if (
+      menuSource !==
+        "CLOUD" ||
+      !cloudLocationId
+    ) {
+      setNotice(
+        "Cloud connection is required to complete a sale. Offline sale syncing has not been enabled yet.",
+      );
+
+      setIsPaymentOpen(
+        false,
+      );
+
+      return;
+    }
+
+    const cloudItems =
+      cart.map(
+        (item) => {
+          if (
+            !item.cloudId
+          ) {
+            throw new Error(
+              `${item.name} is missing its cloud product ID.`,
+            );
+          }
+
+          return {
+            productId:
+              item.cloudId,
+            quantity:
+              item.quantity,
+          };
+        },
+      );
+
+    let cloudOrderNumber =
+      formattedOrderNumber;
+
+    let cloudOrderId = "";
+
+    try {
+      const cloudSale =
+        await completeCloudSale(
+        {
+          locationId:
+            cloudLocationId,
+          orderNumber:
+            formattedOrderNumber,
+          orderType,
+          taxType,
+          vatRate:
+            taxBreakdown.vatRate,
+          netAmount:
+            taxBreakdown.netAmount,
+          vatAmount:
+            taxBreakdown.vatAmount,
+          subtotal,
+          paymentMethod:
+            payment.method,
+          amountReceived:
+            payment.amountReceived,
+          change:
+            payment.change,
+          staffName:
+            activeStaff?.name ??
+            "Unknown",
+          staffRole:
+            activeStaff?.role ??
+            "Unknown",
+          items:
+            cloudItems,
+        },
+      );
+
+      cloudOrderNumber =
+        cloudSale.orderNumber;
+
+      cloudOrderId =
+        cloudSale.orderId;
+    } catch (error) {
+      console.error(
+        "Cloud sale failed:",
+        error,
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown cloud sale error.";
+
+      setNotice(
+        `Sale was not saved. ${message}`,
+      );
+
+      setIsPaymentOpen(
+        false,
+      );
+
+      return;
+    }
+
     const completedOrder:
       SavedOrder = {
         id:
           createOrderId(),
+        cloudOrderId,
         orderNumber:
-          formattedOrderNumber,
+          cloudOrderNumber,
         orderType,
         items:
           cart.map(
@@ -890,7 +1033,7 @@ export default function Home() {
                 newStock:
                   updatedProduct.stockQuantity,
                 note:
-                  `Sale ${formattedOrderNumber}`,
+                  `Sale ${cloudOrderNumber}`,
                 orderId:
                   completedOrder.id,
                 orderNumber:
@@ -937,18 +1080,30 @@ export default function Home() {
         : "Card payment completed.";
 
     setNotice(
-      `Order #${formattedOrderNumber} completed. Stock updated. ${paymentMessage}`,
+      `Order #${cloudOrderNumber} completed and saved to the cloud. Stock updated. ${paymentMessage}`,
     );
 
     setCart([]);
     setTaxType("VAT");
 
+    const cloudOrderNumeric =
+      Number.parseInt(
+        cloudOrderNumber.replace(
+          /\D/g,
+          "",
+        ),
+        10,
+      );
+
     setOrderNumber(
       (
         currentNumber,
       ) =>
-        currentNumber +
-        1,
+        Number.isNaN(
+          cloudOrderNumeric,
+        )
+          ? currentNumber + 1
+          : cloudOrderNumeric + 1,
     );
 
     setIsPaymentOpen(
@@ -961,6 +1116,18 @@ export default function Home() {
       if (
         cart.length === 0
       ) {
+        return;
+      }
+
+      if (
+        menuSource !==
+          "CLOUD" ||
+        !cloudLocationId
+      ) {
+        setNotice(
+          "Cloud connection is required to complete a sale. You can still view the cached menu, but offline checkout is not enabled yet.",
+        );
+
         return;
       }
 
@@ -1092,6 +1259,24 @@ export default function Home() {
               {activeStaff
                 ? `${activeStaff.role}: ${activeStaff.name}`
                 : "No staff signed in"}
+            </p>
+
+            <p
+              className={`mt-1 text-[11px] font-bold ${
+                isMenuLoading
+                  ? "text-slate-400"
+                  : menuSource ===
+                      "CLOUD"
+                    ? "text-emerald-400"
+                    : "text-amber-400"
+              }`}
+            >
+              {isMenuLoading
+                ? "Loading menu..."
+                : menuSource ===
+                    "CLOUD"
+                  ? "● Cloud menu"
+                  : "● Local fallback"}
             </p>
           </div>
 
@@ -1656,13 +1841,16 @@ export default function Home() {
         products={
           products
         }
+        activeStaff={
+          activeStaff
+        }
+        onProductsChange={
+          handleInventoryProductsChange
+        }
         onClose={() =>
           setIsMenuManagementOpen(
             false,
           )
-        }
-        onSave={
-          handleMenuSave
         }
       />
 

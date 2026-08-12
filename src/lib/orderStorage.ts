@@ -75,6 +75,10 @@ export type SavedOrderAuditEntry = {
 export type SavedOrder = {
   id: string;
 
+  // Supabase order UUID for cloud-created orders.
+  // Legacy local-only orders will not have this field.
+  cloudOrderId?: string;
+
   orderNumber: string;
 
   orderType:
@@ -180,6 +184,31 @@ export type OrderFinancialSummary = {
   recognisedVatAmount: number;
 
   remainingRefundableAmount: number;
+};
+
+
+export type RecordCloudRefundLocallyInput = {
+  orderId: string;
+  refundId: string;
+  amount: number;
+  netAmount: number;
+  vatAmount: number;
+  items: SavedOrderRefundItem[];
+  reason: string;
+  performedBy: OrderActionStaff;
+  status:
+    | "Partially Refunded"
+    | "Refunded";
+  createdAt?: string;
+};
+
+
+export type RecordCloudVoidLocallyInput = {
+  orderId: string;
+  cloudOrderId: string;
+  reason: string;
+  performedBy: OrderActionStaff;
+  voidedAt: string;
 };
 
 const ORDER_STORAGE_KEY =
@@ -1071,6 +1100,237 @@ export function refundOrder({
     updatedOrder,
   );
 }
+
+export function recordCloudRefundLocally({
+  orderId,
+  refundId,
+  amount,
+  netAmount,
+  vatAmount,
+  items,
+  reason,
+  performedBy,
+  status,
+  createdAt,
+}: RecordCloudRefundLocallyInput) {
+  const trimmedReason =
+    reason.trim();
+
+  if (!trimmedReason) {
+    throw new Error(
+      "A refund reason is required.",
+    );
+  }
+
+  const currentOrders =
+    loadOrders();
+
+  const selectedOrder =
+    currentOrders.find(
+      (order) =>
+        order.id === orderId,
+    );
+
+  if (!selectedOrder) {
+    throw new Error(
+      "The local order copy could not be found.",
+    );
+  }
+
+  const actionTime =
+    createdAt ??
+    new Date().toISOString();
+
+  const refund:
+    SavedOrderRefund = {
+      id: refundId,
+      amount:
+        roundCurrency(amount),
+      netAmount:
+        roundCurrency(
+          netAmount,
+        ),
+      vatAmount:
+        roundCurrency(
+          vatAmount,
+        ),
+      items,
+      reason:
+        trimmedReason,
+      performedBy,
+      createdAt:
+        actionTime,
+    };
+
+  const auditEntry:
+    SavedOrderAuditEntry = {
+      id: createActionId(
+        "audit",
+      ),
+      action:
+        "ORDER_REFUNDED",
+      reason:
+        trimmedReason,
+      amount:
+        refund.amount,
+      performedBy,
+      createdAt:
+        actionTime,
+    };
+
+  const updatedOrder:
+    SavedOrder = {
+      ...selectedOrder,
+      status,
+      refunds: [
+        ...(selectedOrder.refunds ??
+          []),
+        refund,
+      ],
+      refundedAmount:
+        roundCurrency(
+          (selectedOrder.refundedAmount ??
+            0) +
+            refund.amount,
+        ),
+      refundedNetAmount:
+        roundCurrency(
+          (selectedOrder.refundedNetAmount ??
+            0) +
+            refund.netAmount,
+        ),
+      refundedVatAmount:
+        roundCurrency(
+          (selectedOrder.refundedVatAmount ??
+            0) +
+            refund.vatAmount,
+        ),
+      auditTrail: [
+        ...(selectedOrder.auditTrail ??
+          []),
+        auditEntry,
+      ],
+    };
+
+  return updateOrder(
+    updatedOrder,
+  );
+}
+
+export function recordCloudVoidLocally({
+  orderId,
+  cloudOrderId,
+  reason,
+  performedBy,
+  voidedAt,
+}: RecordCloudVoidLocallyInput) {
+  const trimmedReason =
+    reason.trim();
+
+  if (!trimmedReason) {
+    throw new Error(
+      "A void reason is required.",
+    );
+  }
+
+  const currentOrders =
+    loadOrders();
+
+  const selectedOrder =
+    currentOrders.find(
+      (order) =>
+        order.id === orderId,
+    );
+
+  if (!selectedOrder) {
+    throw new Error(
+      "The local order copy could not be found.",
+    );
+  }
+
+  const auditEntry:
+    SavedOrderAuditEntry = {
+      id: createActionId(
+        "audit",
+      ),
+      action:
+        "ORDER_VOIDED",
+      reason:
+        trimmedReason,
+      amount:
+        selectedOrder.subtotal,
+      performedBy,
+      createdAt:
+        voidedAt,
+    };
+
+  const updatedOrder:
+    SavedOrder = {
+      ...selectedOrder,
+      cloudOrderId,
+      status: "Voided",
+      voidReason:
+        trimmedReason,
+      voidedAt,
+      voidedBy:
+        performedBy,
+      auditTrail: [
+        ...(selectedOrder.auditTrail ??
+          []),
+        auditEntry,
+      ],
+    };
+
+  return updateOrder(
+    updatedOrder,
+  );
+}
+
+
+export function attachCloudOrderIdLocally(
+  orderId: string,
+  cloudOrderId: string,
+) {
+  const currentOrders =
+    loadOrders();
+
+  const selectedOrder =
+    currentOrders.find(
+      (order) =>
+        order.id === orderId,
+    );
+
+  if (!selectedOrder) {
+    throw new Error(
+      "The local order copy could not be found.",
+    );
+  }
+
+  if (
+    selectedOrder.cloudOrderId ===
+    cloudOrderId
+  ) {
+    return currentOrders;
+  }
+
+  const updatedOrders =
+    currentOrders.map(
+      (order) =>
+        order.id === orderId
+          ? {
+              ...order,
+              cloudOrderId,
+            }
+          : order,
+    );
+
+  saveOrders(
+    updatedOrders,
+  );
+
+  return updatedOrders;
+}
+
 
 export function createOrderId() {
   return `order-${Date.now()}-${Math.random()

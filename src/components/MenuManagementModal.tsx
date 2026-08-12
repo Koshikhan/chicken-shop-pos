@@ -7,24 +7,39 @@ import {
 } from "react";
 
 import {
-  createProductId,
+  archiveCloudProduct,
+  saveCloudProduct,
+  setCloudProductAvailability,
+} from "@/lib/cloudCatalog";
+
+import {
+  loadCloudMenu,
+} from "@/lib/cloudMenu";
+
+import {
   getProductStockStatus,
   menuCategories,
   type Category,
   type Product,
 } from "@/lib/menuStorage";
 
+import type {
+  StaffMember,
+} from "@/lib/staffStorage";
+
 type MenuManagementModalProps = {
   isOpen: boolean;
   products: Product[];
+  activeStaff: StaffMember | null;
   onClose: () => void;
-  onSave: (
+  onProductsChange: (
     products: Product[],
   ) => void;
 };
 
 type ProductForm = {
   id: number | null;
+  cloudId: string | null;
   name: string;
   description: string;
   category: Category;
@@ -38,6 +53,7 @@ type ProductForm = {
 
 const emptyForm: ProductForm = {
   id: null,
+  cloudId: null,
   name: "",
   description: "",
   category: "Meals",
@@ -90,14 +106,16 @@ function getStockBadge(
     status === "LOW_STOCK"
   ) {
     return {
-      label: `Low: ${product.stockQuantity}`,
+      label:
+        `Low: ${product.stockQuantity}`,
       classes:
         "bg-amber-100 text-amber-800",
     };
   }
 
   return {
-    label: `Stock: ${product.stockQuantity}`,
+    label:
+      `Stock: ${product.stockQuantity}`,
     classes:
       "bg-green-100 text-green-700",
   };
@@ -106,24 +124,55 @@ function getStockBadge(
 export function MenuManagementModal({
   isOpen,
   products,
+  activeStaff,
   onClose,
-  onSave,
+  onProductsChange,
 }: MenuManagementModalProps) {
   const [
     draftProducts,
     setDraftProducts,
-  ] = useState<Product[]>([]);
+  ] =
+    useState<Product[]>([]);
 
-  const [form, setForm] =
+  const [
+    form,
+    setForm,
+  ] =
     useState<ProductForm>(
       emptyForm,
     );
 
-  const [search, setSearch] =
+  const [
+    search,
+    setSearch,
+  ] =
     useState("");
 
-  const [error, setError] =
+  const [
+    error,
+    setError,
+  ] =
     useState("");
+
+  const [
+    success,
+    setSuccess,
+  ] =
+    useState("");
+
+  const [
+    isSubmitting,
+    setIsSubmitting,
+  ] =
+    useState(false);
+
+  const [
+    busyProductId,
+    setBusyProductId,
+  ] =
+    useState<number | null>(
+      null,
+    );
 
   useEffect(() => {
     if (!isOpen) {
@@ -138,10 +187,24 @@ export function MenuManagementModal({
       ),
     );
 
-    setForm(emptyForm);
+    setForm(
+      emptyForm,
+    );
+
     setSearch("");
     setError("");
-  }, [isOpen, products]);
+    setSuccess("");
+    setIsSubmitting(
+      false,
+    );
+
+    setBusyProductId(
+      null,
+    );
+  }, [
+    isOpen,
+    products,
+  ]);
 
   const filteredProducts =
     useMemo(() => {
@@ -186,34 +249,97 @@ export function MenuManagementModal({
     );
 
     setError("");
+    setSuccess("");
   };
 
-  const resetForm = () => {
-    setForm(emptyForm);
-    setError("");
-  };
+  const resetForm =
+    () => {
+      setForm(
+        emptyForm,
+      );
+
+      setError("");
+    };
+
+  const requireManager =
+    () => {
+      if (
+        !activeStaff ||
+        activeStaff.role !==
+          "Manager"
+      ) {
+        setError(
+          "A manager must be signed in to change the cloud menu.",
+        );
+
+        return null;
+      }
+
+      return activeStaff;
+    };
+
+  const refreshCloudProducts =
+    async () => {
+      const cloudMenu =
+        await loadCloudMenu();
+
+      setDraftProducts(
+        cloudMenu.products,
+      );
+
+      onProductsChange(
+        cloudMenu.products,
+      );
+
+      return cloudMenu.products;
+    };
 
   const editProduct = (
     product: Product,
   ) => {
+    if (!product.cloudId) {
+      setError(
+        "This product is not linked to Supabase. Refresh the POS first.",
+      );
+
+      return;
+    }
+
     setForm({
-      id: product.id,
-      name: product.name,
+      id:
+        product.id,
+
+      cloudId:
+        product.cloudId,
+
+      name:
+        product.name,
+
       description:
         product.description,
+
       category:
         product.category,
+
       price:
-        product.price.toFixed(2),
-      emoji: product.emoji,
+        product.price.toFixed(
+          2,
+        ),
+
+      emoji:
+        product.emoji,
+
       available:
         product.available,
+
       trackStock:
         product.trackStock,
+
       stockQuantity:
         String(
           product.stockQuantity,
         ),
+
       lowStockThreshold:
         String(
           product.lowStockThreshold,
@@ -221,195 +347,325 @@ export function MenuManagementModal({
     });
 
     setError("");
+    setSuccess("");
   };
 
-  const saveProduct = () => {
-    const name =
-      form.name.trim();
+  const saveProduct =
+    async () => {
+      const staff =
+        requireManager();
 
-    const description =
-      form.description.trim();
+      if (!staff) {
+        return;
+      }
 
-    const emoji =
-      form.emoji.trim() ||
-      "🍗";
+      const name =
+        form.name.trim();
 
-    const price =
-      Number.parseFloat(
-        form.price,
-      );
+      const description =
+        form.description.trim();
 
-    const stockQuantity =
-      Number.parseInt(
-        form.stockQuantity,
-        10,
-      );
+      const emoji =
+        form.emoji.trim() ||
+        "🍗";
 
-    const lowStockThreshold =
-      Number.parseInt(
-        form.lowStockThreshold,
-        10,
-      );
+      const price =
+        Number.parseFloat(
+          form.price,
+        );
 
-    if (!name) {
-      setError(
-        "Enter a product name.",
-      );
-      return;
-    }
+      const initialStock =
+        Number.parseInt(
+          form.stockQuantity,
+          10,
+        );
 
-    if (
-      !Number.isFinite(price) ||
-      price <= 0
-    ) {
-      setError(
-        "Enter a valid price greater than £0.00.",
-      );
-      return;
-    }
+      const lowStockThreshold =
+        Number.parseInt(
+          form.lowStockThreshold,
+          10,
+        );
 
-    if (
-      form.trackStock &&
-      (
-        !Number.isInteger(
-          stockQuantity,
+      if (!name) {
+        setError(
+          "Enter a product name.",
+        );
+        return;
+      }
+
+      if (
+        !Number.isFinite(
+          price,
         ) ||
-        stockQuantity < 0
-      )
-    ) {
-      setError(
-        "Stock quantity must be 0 or more.",
-      );
-      return;
-    }
+        price <= 0
+      ) {
+        setError(
+          "Enter a valid price greater than £0.00.",
+        );
+        return;
+      }
 
-    if (
-      form.trackStock &&
-      (
-        !Number.isInteger(
-          lowStockThreshold,
-        ) ||
-        lowStockThreshold < 0
-      )
-    ) {
-      setError(
-        "Low-stock warning must be 0 or more.",
-      );
-      return;
-    }
+      if (
+        form.id === null &&
+        form.trackStock &&
+        (
+          !Number.isInteger(
+            initialStock,
+          ) ||
+          initialStock < 0
+        )
+      ) {
+        setError(
+          "Opening stock must be 0 or more.",
+        );
+        return;
+      }
 
-    const productDetails = {
-      name,
-      description,
-      category:
-        form.category,
-      price,
-      emoji,
-      available:
-        form.available,
-      trackStock:
-        form.trackStock,
-      stockQuantity:
-        form.trackStock
-          ? stockQuantity
-          : 0,
-      lowStockThreshold:
-        form.trackStock
-          ? lowStockThreshold
-          : 0,
+      if (
+        form.trackStock &&
+        (
+          !Number.isInteger(
+            lowStockThreshold,
+          ) ||
+          lowStockThreshold < 0
+        )
+      ) {
+        setError(
+          "Low-stock warning must be 0 or more.",
+        );
+        return;
+      }
+
+      if (
+        form.id !== null &&
+        !form.cloudId
+      ) {
+        setError(
+          "This product is not linked to Supabase.",
+        );
+        return;
+      }
+
+      setIsSubmitting(
+        true,
+      );
+
+      setError("");
+      setSuccess("");
+
+      try {
+        const isNew =
+          form.id === null;
+
+        await saveCloudProduct(
+          {
+            cloudProductId:
+              form.cloudId ??
+              undefined,
+
+            category:
+              form.category,
+
+            name,
+
+            description,
+
+            price,
+
+            emoji,
+
+            available:
+              form.available,
+
+            trackStock:
+              form.trackStock,
+
+            lowStockThreshold:
+              form.trackStock
+                ? lowStockThreshold
+                : 0,
+
+            initialStock:
+              isNew &&
+              form.trackStock
+                ? initialStock
+                : 0,
+
+            staffName:
+              staff.name,
+
+            staffRole:
+              staff.role,
+          },
+        );
+
+        await refreshCloudProducts();
+
+        setForm(
+          emptyForm,
+        );
+
+        setSuccess(
+          isNew
+            ? `${name} was added to the cloud menu.`
+            : `${name} was updated in Supabase.`,
+        );
+      } catch (
+        saveError
+      ) {
+        setError(
+          saveError instanceof
+            Error
+            ? saveError.message
+            : "Unable to save the product.",
+        );
+      } finally {
+        setIsSubmitting(
+          false,
+        );
+      }
     };
 
-    if (
-      form.id === null
-    ) {
-      const newProduct: Product = {
-        id: createProductId(),
-        ...productDetails,
-      };
+  const toggleAvailability =
+    async (
+      product: Product,
+    ) => {
+      const staff =
+        requireManager();
 
-      setDraftProducts(
-        (currentProducts) => [
-          ...currentProducts,
-          newProduct,
-        ],
-      );
-    } else {
-      setDraftProducts(
-        (currentProducts) =>
-          currentProducts.map(
-            (product) =>
-              product.id ===
-              form.id
-                ? {
-                    ...product,
-                    ...productDetails,
-                  }
-                : product,
-          ),
-      );
-    }
+      if (!staff) {
+        return;
+      }
 
-    resetForm();
-  };
+      if (!product.cloudId) {
+        setError(
+          "This product is not linked to Supabase.",
+        );
+        return;
+      }
 
-  const toggleAvailability = (
-    productId: number,
-  ) => {
-    setDraftProducts(
-      (currentProducts) =>
-        currentProducts.map(
-          (product) =>
-            product.id ===
-            productId
-              ? {
-                  ...product,
-                  available:
-                    !product.available,
-                }
-              : product,
-        ),
-    );
-
-    if (
-      form.id === productId
-    ) {
-      setForm(
-        (currentForm) => ({
-          ...currentForm,
-          available:
-            !currentForm.available,
-        }),
-      );
-    }
-  };
-
-  const deleteProduct = (
-    product: Product,
-  ) => {
-    const confirmed =
-      window.confirm(
-        `Delete ${product.name} from the menu?`,
+      setBusyProductId(
+        product.id,
       );
 
-    if (!confirmed) {
-      return;
-    }
+      setError("");
+      setSuccess("");
 
-    setDraftProducts(
-      (currentProducts) =>
-        currentProducts.filter(
-          (item) =>
-            item.id !==
-            product.id,
-        ),
-    );
+      try {
+        const nextAvailable =
+          !product.available;
 
-    if (
-      form.id === product.id
-    ) {
-      resetForm();
-    }
-  };
+        await setCloudProductAvailability(
+          product.cloudId,
+          nextAvailable,
+        );
+
+        await refreshCloudProducts();
+
+        if (
+          form.id ===
+          product.id
+        ) {
+          setForm(
+            (currentForm) => ({
+              ...currentForm,
+              available:
+                nextAvailable,
+            }),
+          );
+        }
+
+        setSuccess(
+          `${product.name} is now ${
+            nextAvailable
+              ? "enabled"
+              : "disabled"
+          } for sale.`,
+        );
+      } catch (
+        availabilityError
+      ) {
+        setError(
+          availabilityError instanceof
+            Error
+            ? availabilityError.message
+            : "Unable to change product availability.",
+        );
+      } finally {
+        setBusyProductId(
+          null,
+        );
+      }
+    };
+
+  const removeProduct =
+    async (
+      product: Product,
+    ) => {
+      const staff =
+        requireManager();
+
+      if (!staff) {
+        return;
+      }
+
+      if (!product.cloudId) {
+        setError(
+          "This product is not linked to Supabase.",
+        );
+        return;
+      }
+
+      const confirmed =
+        window.confirm(
+          `Remove ${product.name} from the active menu?\n\nPast orders and stock history will be kept.`,
+        );
+
+      if (!confirmed) {
+        return;
+      }
+
+      setBusyProductId(
+        product.id,
+      );
+
+      setError("");
+      setSuccess("");
+
+      try {
+        await archiveCloudProduct(
+          product.cloudId,
+        );
+
+        await refreshCloudProducts();
+
+        if (
+          form.id ===
+          product.id
+        ) {
+          setForm(
+            emptyForm,
+          );
+        }
+
+        setSuccess(
+          `${product.name} was removed from the active menu. Historical records were kept.`,
+        );
+      } catch (
+        archiveError
+      ) {
+        setError(
+          archiveError instanceof
+            Error
+            ? archiveError.message
+            : "Unable to remove the product.",
+        );
+      } finally {
+        setBusyProductId(
+          null,
+        );
+      }
+    };
 
   return (
     <div
@@ -426,20 +682,26 @@ export function MenuManagementModal({
             </p>
 
             <h2 className="mt-1 text-3xl font-black text-slate-950">
-              Menu & Inventory
+              Cloud Menu Management
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Manage products,
-              prices, availability
-              and stock levels.
+              Product changes are
+              saved directly to
+              Supabase and shared
+              across tills.
             </p>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-2xl text-slate-500 transition hover:bg-red-100 hover:text-red-600"
+            disabled={
+              isSubmitting ||
+              busyProductId !==
+                null
+            }
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-2xl text-slate-500 transition hover:bg-red-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Close menu management"
           >
             ×
@@ -448,13 +710,33 @@ export function MenuManagementModal({
 
         <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_410px]">
           <div className="min-h-0 overflow-y-auto p-5">
+            {(error ||
+              success) && (
+              <div className="mb-4">
+                {error && (
+                  <p className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">
+                    {error}
+                  </p>
+                )}
+
+                {success && (
+                  <p className="rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-700">
+                    {success}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <input
                 type="search"
                 value={search}
-                onChange={(event) =>
+                onChange={(
+                  event,
+                ) =>
                   setSearch(
-                    event.target.value,
+                    event.target
+                      .value,
                   )
                 }
                 placeholder="Search product or category..."
@@ -462,8 +744,10 @@ export function MenuManagementModal({
               />
 
               <p className="text-sm font-bold text-slate-500">
-                {draftProducts.length}{" "}
-                products
+                {
+                  draftProducts.length
+                }{" "}
+                cloud products
               </p>
             </div>
 
@@ -475,6 +759,10 @@ export function MenuManagementModal({
                       product,
                     );
 
+                  const isBusy =
+                    busyProductId ===
+                    product.id;
+
                   return (
                     <article
                       key={product.id}
@@ -482,13 +770,17 @@ export function MenuManagementModal({
                     >
                       <div className="flex flex-wrap items-start gap-4">
                         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-3xl">
-                          {product.emoji}
+                          {
+                            product.emoji
+                          }
                         </div>
 
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="font-black text-slate-950">
-                              {product.name}
+                              {
+                                product.name
+                              }
                             </h3>
 
                             <span
@@ -506,12 +798,16 @@ export function MenuManagementModal({
                             <span
                               className={`rounded-full px-2.5 py-1 text-xs font-bold ${stockBadge.classes}`}
                             >
-                              {stockBadge.label}
+                              {
+                                stockBadge.label
+                              }
                             </span>
                           </div>
 
                           <p className="mt-1 text-sm text-slate-500">
-                            {product.category}
+                            {
+                              product.category
+                            }
                             {" · "}
                             {currencyFormatter.format(
                               product.price,
@@ -525,8 +821,11 @@ export function MenuManagementModal({
 
                           {product.trackStock && (
                             <p className="mt-2 text-xs font-semibold text-slate-500">
-                              Low-stock warning at{" "}
-                              {product.lowStockThreshold}
+                              Low-stock
+                              warning at{" "}
+                              {
+                                product.lowStockThreshold
+                              }
                             </p>
                           )}
                         </div>
@@ -534,40 +833,54 @@ export function MenuManagementModal({
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() =>
-                              toggleAvailability(
-                                product.id,
-                              )
+                            disabled={
+                              isBusy ||
+                              isSubmitting
                             }
-                            className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-200"
+                            onClick={() => {
+                              void toggleAvailability(
+                                product,
+                              );
+                            }}
+                            className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {product.available
-                              ? "Disable"
-                              : "Enable"}
+                            {isBusy
+                              ? "Saving..."
+                              : product.available
+                                ? "Disable"
+                                : "Enable"}
                           </button>
 
                           <button
                             type="button"
+                            disabled={
+                              isBusy ||
+                              isSubmitting
+                            }
                             onClick={() =>
                               editProduct(
                                 product,
                               )
                             }
-                            className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-800"
+                            className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Edit
                           </button>
 
                           <button
                             type="button"
-                            onClick={() =>
-                              deleteProduct(
-                                product,
-                              )
+                            disabled={
+                              isBusy ||
+                              isSubmitting
                             }
-                            className="rounded-lg bg-red-50 px-3 py-2 text-sm font-bold text-red-700 transition hover:bg-red-100"
+                            onClick={() => {
+                              void removeProduct(
+                                product,
+                              );
+                            }}
+                            className="rounded-lg bg-red-50 px-3 py-2 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            Delete
+                            Remove
                           </button>
                         </div>
                       </div>
@@ -576,14 +889,16 @@ export function MenuManagementModal({
                 },
               )}
 
-              {filteredProducts.length === 0 && (
+              {filteredProducts.length ===
+                0 && (
                 <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-10 text-center">
                   <p className="text-4xl">
                     📦
                   </p>
 
                   <h3 className="mt-3 font-black">
-                    No products found
+                    No products
+                    found
                   </h3>
                 </div>
               )}
@@ -604,11 +919,17 @@ export function MenuManagementModal({
                 </h3>
               </div>
 
-              {form.id !== null && (
+              {form.id !==
+                null && (
                 <button
                   type="button"
-                  onClick={resetForm}
-                  className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700"
+                  disabled={
+                    isSubmitting
+                  }
+                  onClick={
+                    resetForm
+                  }
+                  className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700 disabled:opacity-50"
                 >
                   Cancel edit
                 </button>
@@ -623,14 +944,22 @@ export function MenuManagementModal({
 
                 <input
                   type="text"
-                  value={form.name}
-                  onChange={(event) =>
+                  value={
+                    form.name
+                  }
+                  disabled={
+                    isSubmitting
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "name",
-                      event.target.value,
+                      event.target
+                        .value,
                     )
                   }
-                  className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500"
+                  className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500 disabled:bg-slate-100"
                   placeholder="Chicken burger"
                 />
               </label>
@@ -641,14 +970,22 @@ export function MenuManagementModal({
                 </span>
 
                 <textarea
-                  value={form.description}
-                  onChange={(event) =>
+                  value={
+                    form.description
+                  }
+                  disabled={
+                    isSubmitting
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "description",
-                      event.target.value,
+                      event.target
+                        .value,
                     )
                   }
-                  className="mt-2 min-h-24 w-full resize-none rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500"
+                  className="mt-2 min-h-24 w-full resize-none rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500 disabled:bg-slate-100"
                   placeholder="Chicken fillet, lettuce and sauce"
                 />
               </label>
@@ -660,22 +997,38 @@ export function MenuManagementModal({
                   </span>
 
                   <select
-                    value={form.category}
-                    onChange={(event) =>
+                    value={
+                      form.category
+                    }
+                    disabled={
+                      isSubmitting
+                    }
+                    onChange={(
+                      event,
+                    ) =>
                       updateForm(
                         "category",
-                        event.target.value as Category,
+                        event.target
+                          .value as Category,
                       )
                     }
-                    className="mt-2 w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-3 outline-none focus:border-orange-500"
+                    className="mt-2 w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-3 outline-none focus:border-orange-500 disabled:bg-slate-100"
                   >
                     {menuCategories.map(
-                      (category) => (
+                      (
+                        category,
+                      ) => (
                         <option
-                          key={category}
-                          value={category}
+                          key={
+                            category
+                          }
+                          value={
+                            category
+                          }
                         >
-                          {category}
+                          {
+                            category
+                          }
                         </option>
                       ),
                     )}
@@ -696,14 +1049,22 @@ export function MenuManagementModal({
                       type="number"
                       min="0.01"
                       step="0.01"
-                      value={form.price}
-                      onChange={(event) =>
+                      value={
+                        form.price
+                      }
+                      disabled={
+                        isSubmitting
+                      }
+                      onChange={(
+                        event,
+                      ) =>
                         updateForm(
                           "price",
-                          event.target.value,
+                          event.target
+                            .value,
                         )
                       }
-                      className="min-w-0 flex-1 px-2 py-3 outline-none"
+                      className="min-w-0 flex-1 px-2 py-3 outline-none disabled:bg-slate-100"
                       placeholder="0.00"
                     />
                   </div>
@@ -712,19 +1073,28 @@ export function MenuManagementModal({
 
               <label className="block">
                 <span className="text-sm font-bold text-slate-700">
-                  Product icon or emoji
+                  Product icon or
+                  emoji
                 </span>
 
                 <input
                   type="text"
-                  value={form.emoji}
-                  onChange={(event) =>
+                  value={
+                    form.emoji
+                  }
+                  disabled={
+                    isSubmitting
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "emoji",
-                      event.target.value,
+                      event.target
+                        .value,
                     )
                   }
-                  className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-2xl outline-none focus:border-orange-500"
+                  className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-2xl outline-none focus:border-orange-500 disabled:bg-slate-100"
                   placeholder="🍗"
                 />
               </label>
@@ -736,129 +1106,226 @@ export function MenuManagementModal({
                   </p>
 
                   <p className="text-xs text-slate-500">
-                    Reduce quantity automatically after each sale.
+                    Sales reduce
+                    stock automatically.
                   </p>
                 </div>
 
                 <input
                   type="checkbox"
-                  checked={form.trackStock}
-                  onChange={(event) =>
+                  checked={
+                    form.trackStock
+                  }
+                  disabled={
+                    isSubmitting
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "trackStock",
-                      event.target.checked,
+                      event.target
+                        .checked,
                     )
                   }
                   className="h-6 w-6 accent-orange-500"
                 />
               </label>
 
-              {form.trackStock && (
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="block">
-                    <span className="text-sm font-bold text-slate-700">
-                      Stock quantity
-                    </span>
+              {form.trackStock &&
+                (
+                  form.id ===
+                  null ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="text-sm font-bold text-slate-700">
+                          Opening
+                          stock
+                        </span>
 
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={form.stockQuantity}
-                      onChange={(event) =>
-                        updateForm(
-                          "stockQuantity",
-                          event.target.value,
-                        )
-                      }
-                      className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500"
-                    />
-                  </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={
+                            form.stockQuantity
+                          }
+                          disabled={
+                            isSubmitting
+                          }
+                          onChange={(
+                            event,
+                          ) =>
+                            updateForm(
+                              "stockQuantity",
+                              event.target
+                                .value,
+                            )
+                          }
+                          className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500 disabled:bg-slate-100"
+                        />
+                      </label>
 
-                  <label className="block">
-                    <span className="text-sm font-bold text-slate-700">
-                      Low-stock level
-                    </span>
+                      <label className="block">
+                        <span className="text-sm font-bold text-slate-700">
+                          Low-stock
+                          level
+                        </span>
 
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={form.lowStockThreshold}
-                      onChange={(event) =>
-                        updateForm(
-                          "lowStockThreshold",
-                          event.target.value,
-                        )
-                      }
-                      className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500"
-                    />
-                  </label>
-                </div>
-              )}
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={
+                            form.lowStockThreshold
+                          }
+                          disabled={
+                            isSubmitting
+                          }
+                          onChange={(
+                            event,
+                          ) =>
+                            updateForm(
+                              "lowStockThreshold",
+                              event.target
+                                .value,
+                            )
+                          }
+                          className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500 disabled:bg-slate-100"
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                        <p className="text-sm font-bold text-blue-900">
+                          Current stock:{" "}
+                          {
+                            form.stockQuantity
+                          }
+                        </p>
+
+                        <p className="mt-1 text-xs text-blue-700">
+                          Use Inventory
+                          Management to
+                          change an
+                          existing stock
+                          quantity. This
+                          keeps the stock
+                          audit trail
+                          correct.
+                        </p>
+                      </div>
+
+                      <label className="block">
+                        <span className="text-sm font-bold text-slate-700">
+                          Low-stock level
+                        </span>
+
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={
+                            form.lowStockThreshold
+                          }
+                          disabled={
+                            isSubmitting
+                          }
+                          onChange={(
+                            event,
+                          ) =>
+                            updateForm(
+                              "lowStockThreshold",
+                              event.target
+                                .value,
+                            )
+                          }
+                          className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500 disabled:bg-slate-100"
+                        />
+                      </label>
+                    </>
+                  )
+                )}
 
               <label className="flex cursor-pointer items-center justify-between rounded-xl bg-slate-100 p-4">
                 <div>
                   <p className="font-bold text-slate-950">
-                    Available for sale
+                    Available for
+                    sale
                   </p>
 
                   <p className="text-xs text-slate-500">
-                    Disable the product without deleting it.
+                    Disable without
+                    removing the
+                    product.
                   </p>
                 </div>
 
                 <input
                   type="checkbox"
-                  checked={form.available}
-                  onChange={(event) =>
+                  checked={
+                    form.available
+                  }
+                  disabled={
+                    isSubmitting
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "available",
-                      event.target.checked,
+                      event.target
+                        .checked,
                     )
                   }
                   className="h-6 w-6 accent-orange-500"
                 />
               </label>
 
-              {error && (
-                <p className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">
-                  {error}
-                </p>
-              )}
-
               <button
                 type="button"
-                onClick={saveProduct}
-                className="w-full rounded-xl bg-orange-500 px-5 py-4 font-black text-white transition hover:bg-orange-600"
+                disabled={
+                  isSubmitting ||
+                  busyProductId !==
+                    null
+                }
+                onClick={() => {
+                  void saveProduct();
+                }}
+                className="w-full rounded-xl bg-orange-500 px-5 py-4 font-black text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {form.id === null
-                  ? "Add product"
-                  : "Update product"}
+                {isSubmitting
+                  ? "Saving to Supabase..."
+                  : form.id ===
+                      null
+                    ? "Add cloud product"
+                    : "Update cloud product"}
               </button>
             </div>
           </aside>
         </div>
 
-        <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 bg-white p-5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-200"
-          >
-            Cancel
-          </button>
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white p-5">
+          <p className="text-sm font-semibold text-slate-500">
+            Changes above are
+            saved immediately to
+            the cloud.
+          </p>
 
           <button
             type="button"
-            onClick={() =>
-              onSave(
-                draftProducts,
-              )
+            disabled={
+              isSubmitting ||
+              busyProductId !==
+                null
             }
-            className="rounded-xl bg-green-600 px-6 py-3 font-black text-white transition hover:bg-green-700"
+            onClick={
+              onClose
+            }
+            className="rounded-xl bg-green-600 px-6 py-3 font-black text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            Save menu and stock
+            Done
           </button>
         </footer>
       </section>

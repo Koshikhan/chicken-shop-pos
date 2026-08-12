@@ -7,6 +7,12 @@ import {
 } from "react";
 
 import {
+  adjustCloudInventory,
+  loadCloudInventoryMovements,
+  type CloudInventoryAdjustmentType,
+} from "@/lib/cloudInventory";
+
+import {
   addInventoryMovements,
   createInventoryMovement,
   loadInventoryMovements,
@@ -15,7 +21,7 @@ import {
 } from "@/lib/inventoryStorage";
 
 import {
-  getProductStockStatus,
+  getProductStockStatus, 
   type Product,
   type ProductStockStatus,
 } from "@/lib/menuStorage";
@@ -39,9 +45,7 @@ type InventoryFilter =
   | ProductStockStatus;
 
 type AdjustmentType =
-  | "RESTOCK"
-  | "WASTE"
-  | "CORRECTION";
+  CloudInventoryAdjustmentType;
 
 const dateTimeFormatter =
   new Intl.DateTimeFormat(
@@ -193,10 +197,22 @@ export function InventoryManagementModal({
       InventoryMovement[]
     >([]);
 
+  const [
+    isLoadingMovements,
+    setIsLoadingMovements,
+  ] = useState(false);
+
+  const [
+    isSubmitting,
+    setIsSubmitting,
+  ] = useState(false);
+
   useEffect(() => {
     if (!isOpen) {
       return;
     }
+
+    let cancelled = false;
 
     setSearch("");
     setFilter("ALL");
@@ -210,10 +226,55 @@ export function InventoryManagementModal({
     setNote("");
     setError("");
     setSuccess("");
-    setMovements(
-      loadInventoryMovements(),
-    );
-  }, [isOpen]);
+
+    const loadMovements =
+      async () => {
+        setIsLoadingMovements(
+          true,
+        );
+
+        try {
+          const cloudMovements =
+            await loadCloudInventoryMovements(
+              products,
+            );
+
+          if (cancelled) {
+            return;
+          }
+
+          setMovements(
+            cloudMovements,
+          );
+        } catch (loadError) {
+          console.error(
+            "Unable to load cloud inventory movements. Using local cache:",
+            loadError,
+          );
+
+          if (!cancelled) {
+            setMovements(
+              loadInventoryMovements(),
+            );
+          }
+        } finally {
+          if (!cancelled) {
+            setIsLoadingMovements(
+              false,
+            );
+          }
+        }
+      };
+
+    void loadMovements();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    products,
+  ]);
 
   const filteredProducts =
     useMemo(() => {
@@ -283,6 +344,7 @@ export function InventoryManagementModal({
       return {
         tracked:
           tracked.length,
+
         inStock:
           tracked.filter(
             (product) =>
@@ -290,6 +352,7 @@ export function InventoryManagementModal({
                 product,
               ) === "IN_STOCK",
           ).length,
+
         lowStock:
           tracked.filter(
             (product) =>
@@ -297,6 +360,7 @@ export function InventoryManagementModal({
                 product,
               ) === "LOW_STOCK",
           ).length,
+
         outOfStock:
           tracked.filter(
             (product) =>
@@ -305,6 +369,7 @@ export function InventoryManagementModal({
               ) ===
               "OUT_OF_STOCK",
           ).length,
+
         units:
           tracked.reduce(
             (
@@ -328,6 +393,7 @@ export function InventoryManagementModal({
     setSelectedProductId(
       product.id,
     );
+
     setQuantityValue("");
     setNote("");
     setError("");
@@ -335,7 +401,7 @@ export function InventoryManagementModal({
   };
 
   const applyAdjustment =
-    () => {
+    async () => {
       if (
         !selectedProduct
       ) {
@@ -345,11 +411,27 @@ export function InventoryManagementModal({
         return;
       }
 
+      if (!activeStaff) {
+        setError(
+          "A staff member must be signed in.",
+        );
+        return;
+      }
+
+      if (
+        !selectedProduct.cloudId
+      ) {
+        setError(
+          "This product is not linked to Supabase. Refresh the POS and try again.",
+        );
+        return;
+      }
+
       if (
         !selectedProduct.trackStock
       ) {
         setError(
-          "Stock tracking is disabled for this product. Enable it in Menu & Inventory first.",
+          "Stock tracking is disabled for this product.",
         );
         return;
       }
@@ -398,127 +480,137 @@ export function InventoryManagementModal({
         return;
       }
 
-      const previousStock =
-        selectedProduct.stockQuantity;
+      setIsSubmitting(
+        true,
+      );
 
-      let newStock =
-        previousStock;
+      setError("");
+      setSuccess("");
 
-      if (
-        adjustmentType ===
-        "RESTOCK"
-      ) {
-        newStock =
-          previousStock +
-          quantity;
-      }
+      try {
+        const cloudResult =
+          await adjustCloudInventory(
+            {
+              productId:
+                selectedProduct.cloudId,
 
-      if (
-        adjustmentType ===
-        "WASTE"
-      ) {
-        if (
-          quantity >
-          previousStock
-        ) {
-          setError(
-            `Only ${previousStock} units are currently available.`,
+              adjustmentType,
+
+              quantity,
+
+              note:
+                note.trim(),
+
+              staffName:
+                activeStaff.name,
+
+              staffRole:
+                activeStaff.role,
+            },
           );
-          return;
+
+        const updatedProducts =
+          products.map(
+            (product) =>
+              product.id ===
+              selectedProduct.id
+                ? {
+                    ...product,
+                    stockQuantity:
+                      cloudResult.newStock,
+                  }
+                : product,
+          );
+
+        const localMovement =
+          createInventoryMovement(
+            {
+              productId:
+                selectedProduct.id,
+
+              productName:
+                selectedProduct.name,
+
+              type:
+                adjustmentType,
+
+              quantityChange:
+                cloudResult.quantityChange,
+
+              previousStock:
+                cloudResult.previousStock,
+
+              newStock:
+                cloudResult.newStock,
+
+              note:
+                note.trim() ||
+                (
+                  adjustmentType ===
+                  "RESTOCK"
+                    ? "Stock delivery"
+                    : undefined
+                ),
+
+              performedBy: {
+                name:
+                  activeStaff.name,
+                role:
+                  activeStaff.role,
+              },
+
+              createdAt:
+                cloudResult.createdAt,
+            },
+          );
+
+        // Keep a browser copy only as a fallback.
+        addInventoryMovements(
+          [localMovement],
+        );
+
+        onProductsChange(
+          updatedProducts,
+        );
+
+        try {
+          const refreshedMovements =
+            await loadCloudInventoryMovements(
+              updatedProducts,
+            );
+
+          setMovements(
+            refreshedMovements,
+          );
+        } catch {
+          setMovements(
+            (current) => [
+              localMovement,
+              ...current,
+            ],
+          );
         }
 
-        newStock =
-          previousStock -
-          quantity;
-      }
+        setQuantityValue("");
+        setNote("");
 
-      if (
-        adjustmentType ===
-        "CORRECTION"
-      ) {
-        newStock =
-          quantity;
-      }
-
-      const quantityChange =
-        newStock -
-        previousStock;
-
-      if (
-        quantityChange === 0
+        setSuccess(
+          `${selectedProduct.name} stock changed from ${cloudResult.previousStock} to ${cloudResult.newStock} in Supabase.`,
+        );
+      } catch (
+        adjustmentError
       ) {
         setError(
-          "This adjustment does not change the stock quantity.",
+          adjustmentError instanceof
+            Error
+            ? adjustmentError.message
+            : "Unable to update cloud inventory.",
         );
-        return;
+      } finally {
+        setIsSubmitting(
+          false,
+        );
       }
-
-      const updatedProducts =
-        products.map(
-          (product) =>
-            product.id ===
-            selectedProduct.id
-              ? {
-                  ...product,
-                  stockQuantity:
-                    newStock,
-                }
-              : product,
-        );
-
-      const movement =
-        createInventoryMovement(
-          {
-            productId:
-              selectedProduct.id,
-            productName:
-              selectedProduct.name,
-            type:
-              adjustmentType,
-            quantityChange,
-            previousStock,
-            newStock,
-            note:
-              note.trim() ||
-              (
-                adjustmentType ===
-                "RESTOCK"
-                  ? "Stock delivery"
-                  : undefined
-              ),
-            ...(activeStaff
-              ? {
-                  performedBy:
-                    {
-                      name:
-                        activeStaff.name,
-                      role:
-                        activeStaff.role,
-                    },
-                }
-              : {}),
-          },
-        );
-
-      const updatedMovements =
-        addInventoryMovements(
-          [movement],
-        );
-
-      onProductsChange(
-        updatedProducts,
-      );
-
-      setMovements(
-        updatedMovements,
-      );
-
-      setQuantityValue("");
-      setNote("");
-      setError("");
-      setSuccess(
-        `${selectedProduct.name} stock changed from ${previousStock} to ${newStock}.`,
-      );
     };
 
   return (
@@ -541,8 +633,9 @@ export function InventoryManagementModal({
 
             <p className="mt-2 text-sm text-slate-500">
               Restock products,
-              record waste and review
-              stock movements.
+              record waste,
+              correct stock counts and
+              review cloud movements.
             </p>
           </div>
 
@@ -771,7 +864,7 @@ export function InventoryManagementModal({
                       </span>
 
                       <div>
-                        <p className="font-black">
+                        <p className="font-black text-slate-950">
                           {selectedProduct.name}
                         </p>
 
@@ -787,52 +880,44 @@ export function InventoryManagementModal({
                     </div>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-3 gap-2">
-                    {(
-                      [
-                        "RESTOCK",
-                        "WASTE",
-                        "CORRECTION",
-                      ] as AdjustmentType[]
-                    ).map(
-                      (type) => (
-                        <button
-                          key={type}
-                          type="button"
-                          onClick={() => {
-                            setAdjustmentType(
-                              type,
-                            );
-                            setQuantityValue(
-                              "",
-                            );
-                            setError("");
-                            setSuccess("");
-                          }}
-                          className={`rounded-xl px-3 py-3 text-xs font-black transition ${
-                            adjustmentType ===
-                            type
-                              ? "bg-slate-950 text-white"
-                              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                          }`}
-                        >
-                          {type ===
-                          "RESTOCK"
-                            ? "Restock"
-                            : type ===
-                                "WASTE"
-                              ? "Waste"
-                              : "Correction"}
-                        </button>
-                      ),
-                    )}
-                  </div>
+                  <label className="mt-5 block">
+                    <span className="text-sm font-bold text-slate-700">
+                      Adjustment type
+                    </span>
+
+                    <select
+                      value={adjustmentType}
+                      onChange={(
+                        event,
+                      ) => {
+                        setAdjustmentType(
+                          event.target
+                            .value as AdjustmentType,
+                        );
+                        setError("");
+                        setSuccess("");
+                      }}
+                      className="mt-2 w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 font-semibold outline-none focus:border-orange-500"
+                    >
+                      <option value="RESTOCK">
+                        Restock
+                      </option>
+
+                      <option value="WASTE">
+                        Waste
+                      </option>
+
+                      <option value="CORRECTION">
+                        Stock correction
+                      </option>
+                    </select>
+                  </label>
 
                   <label className="mt-4 block">
                     <span className="text-sm font-bold text-slate-700">
                       {adjustmentType ===
                       "CORRECTION"
-                        ? "Correct stock to"
+                        ? "Correct stock count"
                         : "Quantity"}
                     </span>
 
@@ -845,25 +930,24 @@ export function InventoryManagementModal({
                         event,
                       ) => {
                         setQuantityValue(
-                          event.target
-                            .value,
+                          event.target.value,
                         );
                         setError("");
                         setSuccess("");
                       }}
-                      className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-lg font-black outline-none focus:border-orange-500"
+                      className="mt-2 w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-xl font-black outline-none focus:border-orange-500"
                       placeholder={
                         adjustmentType ===
                         "CORRECTION"
-                          ? "New stock total"
-                          : "Number of units"
+                          ? "Exact stock count"
+                          : "0"
                       }
                     />
                   </label>
 
                   <label className="mt-4 block">
                     <span className="text-sm font-bold text-slate-700">
-                      Reason or note
+                      Note
                     </span>
 
                     <textarea
@@ -872,45 +956,47 @@ export function InventoryManagementModal({
                         event,
                       ) => {
                         setNote(
-                          event.target
-                            .value,
+                          event.target.value,
                         );
                         setError("");
                         setSuccess("");
                       }}
-                      className="mt-2 min-h-24 w-full resize-none rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500"
                       placeholder={
                         adjustmentType ===
                         "RESTOCK"
-                          ? "Supplier delivery or invoice reference"
-                          : "Reason required"
+                          ? "Optional, e.g. supplier delivery"
+                          : "Required reason"
                       }
+                      className="mt-2 min-h-24 w-full resize-none rounded-xl border-2 border-slate-200 px-4 py-3 outline-none focus:border-orange-500"
                     />
                   </label>
 
                   {error && (
-                    <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">
+                    <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">
                       {error}
                     </p>
                   )}
 
                   {success && (
-                    <p className="mt-4 rounded-xl bg-green-50 p-3 text-sm font-semibold text-green-700">
+                    <p className="mt-4 rounded-xl bg-green-50 p-3 text-sm font-bold text-green-700">
                       {success}
                     </p>
                   )}
 
                   <button
                     type="button"
-                    onClick={
-                      applyAdjustment
-                    }
+                    onClick={() => {
+                      void applyAdjustment();
+                    }}
                     disabled={
+                      isSubmitting ||
                       !selectedProduct.trackStock
                     }
-                    className="mt-4 w-full rounded-xl bg-orange-500 px-5 py-4 font-black text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    className="mt-5 w-full rounded-xl bg-orange-500 px-5 py-4 font-black text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
-                    Apply adjustment
+                    {isSubmitting
+                      ? "Saving to cloud..."
+                      : "Apply stock adjustment"}
                   </button>
                 </div>
               )}
@@ -918,133 +1004,96 @@ export function InventoryManagementModal({
           </div>
 
           <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            <div className="border-b border-slate-200 p-5">
-              <p className="text-sm font-bold uppercase tracking-wider text-orange-500">
-                Stock movement history
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-wider text-orange-500">
+                  Movement history
+                </p>
 
-              <p className="mt-1 text-sm text-slate-500">
-                Latest 100 movements
-                are shown.
+                <h3 className="mt-1 text-xl font-black">
+                  Cloud stock audit
+                </h3>
+              </div>
+
+              <p className="text-sm font-semibold text-slate-500">
+                {isLoadingMovements
+                  ? "Loading from Supabase..."
+                  : `${movements.length} movements`}
               </p>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] text-sm">
-                <thead className="bg-slate-100 text-left">
-                  <tr>
-                    <th className="px-5 py-3">
-                      Date
-                    </th>
-
-                    <th className="px-5 py-3">
-                      Product
-                    </th>
-
-                    <th className="px-5 py-3">
-                      Type
-                    </th>
-
-                    <th className="px-5 py-3 text-right">
-                      Change
-                    </th>
-
-                    <th className="px-5 py-3 text-right">
-                      Before
-                    </th>
-
-                    <th className="px-5 py-3 text-right">
-                      After
-                    </th>
-
-                    <th className="px-5 py-3">
-                      Staff
-                    </th>
-
-                    <th className="px-5 py-3">
-                      Note
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {movements.length ===
-                    0 ? (
-                    <tr>
-                      <td
-                        colSpan={8}
-                        className="px-5 py-12 text-center text-slate-500"
+            <div className="max-h-96 overflow-y-auto">
+              {movements.length ===
+                0 &&
+              !isLoadingMovements ? (
+                <p className="p-8 text-center text-slate-500">
+                  No stock movements
+                  yet.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {movements.map(
+                    (movement) => (
+                      <article
+                        key={movement.id}
+                        className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_150px_130px_180px]"
                       >
-                        No inventory
-                        movements recorded.
-                      </td>
-                    </tr>
-                  ) : (
-                    movements
-                      .slice(0, 100)
-                      .map(
-                        (movement) => (
-                          <tr
-                            key={movement.id}
-                            className="border-t border-slate-200"
+                        <div>
+                          <p className="font-black text-slate-950">
+                            {movement.productName}
+                          </p>
+
+                          <p className="mt-1 text-sm text-slate-500">
+                            {movement.note ||
+                              "No note"}
+                          </p>
+
+                          {movement.performedBy && (
+                            <p className="mt-1 text-xs font-semibold text-slate-400">
+                              {movement.performedBy.name}
+                              {" · "}
+                              {movement.performedBy.role}
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getMovementClasses(
+                              movement.quantityChange,
+                            )}`}
                           >
-                            <td className="px-5 py-4">
-                              {dateTimeFormatter.format(
-                                new Date(
-                                  movement.createdAt,
-                                ),
-                              )}
-                            </td>
+                            {getMovementLabel(
+                              movement.type,
+                            )}
+                          </span>
+                        </div>
 
-                            <td className="px-5 py-4 font-black">
-                              {movement.productName}
-                            </td>
+                        <div className="font-black">
+                          {movement.quantityChange >
+                          0
+                            ? "+"
+                            : ""}
+                          {movement.quantityChange}
+                          <span className="ml-2 text-sm font-semibold text-slate-400">
+                            {movement.previousStock}
+                            {" → "}
+                            {movement.newStock}
+                          </span>
+                        </div>
 
-                            <td className="px-5 py-4">
-                              {getMovementLabel(
-                                movement.type,
-                              )}
-                            </td>
-
-                            <td className="px-5 py-4 text-right">
-                              <span
-                                className={`rounded-full px-3 py-1 text-xs font-black ${getMovementClasses(
-                                  movement.quantityChange,
-                                )}`}
-                              >
-                                {movement.quantityChange >
-                                0
-                                  ? "+"
-                                  : ""}
-                                {movement.quantityChange}
-                              </span>
-                            </td>
-
-                            <td className="px-5 py-4 text-right">
-                              {movement.previousStock}
-                            </td>
-
-                            <td className="px-5 py-4 text-right font-black">
-                              {movement.newStock}
-                            </td>
-
-                            <td className="px-5 py-4">
-                              {movement.performedBy
-                                ? `${movement.performedBy.name} (${movement.performedBy.role})`
-                                : "System"}
-                            </td>
-
-                            <td className="px-5 py-4 text-slate-500">
-                              {movement.note ||
-                                movement.orderNumber ||
-                                "—"}
-                            </td>
-                          </tr>
-                        ),
-                      )
+                        <time className="text-sm font-semibold text-slate-500">
+                          {dateTimeFormatter.format(
+                            new Date(
+                              movement.createdAt,
+                            ),
+                          )}
+                        </time>
+                      </article>
+                    ),
                   )}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
           </section>
         </div>

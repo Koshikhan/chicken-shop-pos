@@ -10,8 +10,14 @@ export const menuCategories = [
 export type Category =
   (typeof menuCategories)[number];
 
+export type ProductSource =
+  | "LOCAL"
+  | "CLOUD";
+
 export type Product = {
   id: number;
+  cloudId?: string;
+  source?: ProductSource;
   name: string;
   description: string;
   category: Category;
@@ -46,6 +52,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 30,
     lowStockThreshold: 5,
+    source: "LOCAL",
   },
   {
     id: 2,
@@ -58,6 +65,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 25,
     lowStockThreshold: 5,
+    source: "LOCAL",
   },
   {
     id: 3,
@@ -70,6 +78,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 10,
     lowStockThreshold: 3,
+    source: "LOCAL",
   },
   {
     id: 4,
@@ -82,6 +91,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 60,
     lowStockThreshold: 10,
+    source: "LOCAL",
   },
   {
     id: 5,
@@ -94,6 +104,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 30,
     lowStockThreshold: 6,
+    source: "LOCAL",
   },
   {
     id: 6,
@@ -106,6 +117,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 20,
     lowStockThreshold: 5,
+    source: "LOCAL",
   },
   {
     id: 7,
@@ -118,6 +130,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 35,
     lowStockThreshold: 6,
+    source: "LOCAL",
   },
   {
     id: 8,
@@ -130,6 +143,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 25,
     lowStockThreshold: 5,
+    source: "LOCAL",
   },
   {
     id: 9,
@@ -142,6 +156,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 30,
     lowStockThreshold: 5,
+    source: "LOCAL",
   },
   {
     id: 10,
@@ -154,6 +169,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 50,
     lowStockThreshold: 10,
+    source: "LOCAL",
   },
   {
     id: 11,
@@ -166,6 +182,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 20,
     lowStockThreshold: 5,
+    source: "LOCAL",
   },
   {
     id: 12,
@@ -178,6 +195,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 48,
     lowStockThreshold: 12,
+    source: "LOCAL",
   },
   {
     id: 13,
@@ -190,6 +208,7 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 0,
     lowStockThreshold: 10,
+    source: "LOCAL",
   },
 ];
 
@@ -264,6 +283,14 @@ export function normaliseProduct(
 
   return {
     id: product.id,
+    cloudId:
+      typeof product.cloudId === "string"
+        ? product.cloudId
+        : undefined,
+    source:
+      product.source === "CLOUD"
+        ? "CLOUD"
+        : "LOCAL",
     name: product.name,
     description: product.description,
     category: product.category,
@@ -271,21 +298,21 @@ export function normaliseProduct(
     emoji: product.emoji,
     available: product.available,
     trackStock,
-    stockQuantity: toNonNegativeInteger(
-      product.stockQuantity,
-      defaultStock,
-    ),
-    lowStockThreshold: toNonNegativeInteger(
-      product.lowStockThreshold,
-      5,
-    ),
+    stockQuantity:
+      toNonNegativeInteger(
+        product.stockQuantity,
+        defaultStock,
+      ),
+    lowStockThreshold:
+      toNonNegativeInteger(
+        product.lowStockThreshold,
+        5,
+      ),
   };
 }
 
 export function loadMenu(): Product[] {
-  if (
-    typeof window === "undefined"
-  ) {
+  if (typeof window === "undefined") {
     return DEFAULT_PRODUCTS;
   }
 
@@ -327,9 +354,7 @@ export function loadMenu(): Product[] {
 export function saveMenu(
   products: Product[],
 ) {
-  if (
-    typeof window === "undefined"
-  ) {
+  if (typeof window === "undefined") {
     return;
   }
 
@@ -357,9 +382,7 @@ export function getProductStockStatus(
     return "UNTRACKED";
   }
 
-  if (
-    product.stockQuantity <= 0
-  ) {
+  if (product.stockQuantity <= 0) {
     return "OUT_OF_STOCK";
   }
 

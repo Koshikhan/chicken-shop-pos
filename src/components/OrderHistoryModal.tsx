@@ -11,15 +11,25 @@ import {
   createInventoryMovement,
 } from "@/lib/inventoryStorage";
 
+import {
+  loadCloudRefundableOrder,
+  refundCloudOrder,
+  type CloudRefundableOrder,
+} from "@/lib/cloudRefunds";
+
+import {
+  voidCloudOrder,
+} from "@/lib/cloudVoids";
+
 import type {
   Product,
 } from "@/lib/menuStorage";
 
 import {
+  attachCloudOrderIdLocally,
   getOrderFinancialSummary,
-  getRemainingRefundableQuantity,
-  refundOrder,
-  voidOrder,
+  recordCloudRefundLocally,
+  recordCloudVoidLocally,
   type SavedOrder,
 } from "@/lib/orderStorage";
 
@@ -185,6 +195,24 @@ export function OrderHistoryModal({
   const [notice, setNotice] =
     useState("");
 
+  const [
+    cloudRefundOrder,
+    setCloudRefundOrder,
+  ] =
+    useState<CloudRefundableOrder | null>(
+      null,
+    );
+
+  const [
+    isRefundLoading,
+    setIsRefundLoading,
+  ] = useState(false);
+
+  const [
+    isActionSubmitting,
+    setIsActionSubmitting,
+  ] = useState(false);
+
   useEffect(() => {
     setDisplayOrders(
       orders,
@@ -323,16 +351,56 @@ export function OrderHistoryModal({
     ) ?? null;
 
   const refundableItems =
-    actionOrder
-      ? actionOrder.items.map(
-          (item) => ({
-            ...item,
-            remainingQuantity:
-              getRemainingRefundableQuantity(
-                actionOrder,
-                item.id,
-              ),
-          }),
+    actionType === "refund" &&
+    actionOrder &&
+    cloudRefundOrder
+      ? cloudRefundOrder.items.map(
+          (cloudItem) => {
+            const matchingProduct =
+              products.find(
+                (product) =>
+                  product.cloudId ===
+                  cloudItem.productId,
+              ) ??
+              products.find(
+                (product) =>
+                  product.name ===
+                  cloudItem.productName,
+              );
+
+            const matchingLocalItem =
+              actionOrder.items.find(
+                (item) =>
+                  matchingProduct
+                    ? item.id ===
+                      matchingProduct.id
+                    : item.name ===
+                      cloudItem.productName,
+              );
+
+            return {
+              id:
+                cloudItem.orderItemId,
+              orderItemId:
+                cloudItem.orderItemId,
+              productId:
+                cloudItem.productId,
+              localProductId:
+                matchingLocalItem?.id ??
+                matchingProduct?.id ??
+                null,
+              name:
+                cloudItem.productName,
+              price:
+                cloudItem.unitPrice,
+              quantity:
+                cloudItem.quantity,
+              refundedQuantity:
+                cloudItem.refundedQuantity,
+              remainingQuantity:
+                cloudItem.remainingQuantity,
+            };
+          },
         )
       : [];
 
@@ -356,7 +424,12 @@ export function OrderHistoryModal({
 
         return [
           {
-            id: item.id,
+            orderItemId:
+              item.orderItemId,
+            productId:
+              item.productId,
+            localProductId:
+              item.localProductId,
             name: item.name,
             price: item.price,
             quantity:
@@ -413,6 +486,15 @@ export function OrderHistoryModal({
       );
       setActionReason("");
       setActionError("");
+      setCloudRefundOrder(
+        null,
+      );
+      setIsRefundLoading(
+        false,
+      );
+      setIsActionSubmitting(
+        false,
+      );
     };
 
   const publishOrders = (
@@ -428,34 +510,97 @@ export function OrderHistoryModal({
     );
   };
 
-  const openRefund = (
+  const openRefund = async (
     order: SavedOrder,
   ) => {
-    const selections:
-      RefundSelections = {};
-
-    order.items.forEach(
-      (item) => {
-        selections[
-          String(item.id)
-        ] = {
-          quantity: 0,
-          restock: false,
-        };
-      },
-    );
-
     setActionType(
       "refund",
     );
+
     setActionOrderId(
       order.id,
     );
+
     setRefundSelections(
-      selections,
+      {},
     );
+
     setActionReason("");
     setActionError("");
+    setCloudRefundOrder(
+      null,
+    );
+    setIsRefundLoading(
+      true,
+    );
+
+    try {
+      const cloudOrder =
+        await loadCloudRefundableOrder(
+          {
+            cloudOrderId:
+              order.cloudOrderId,
+            orderNumber:
+              order.orderNumber,
+            subtotal:
+              order.subtotal,
+            orderType:
+              order.orderType,
+            paymentMethod:
+              order.paymentMethod,
+            createdAt:
+              order.createdAt,
+          },
+        );
+
+      setCloudRefundOrder(
+        cloudOrder,
+      );
+
+      // Existing cloud sales created before cloudOrderId was
+      // added can be safely linked after their details match.
+      if (
+        !order.cloudOrderId
+      ) {
+        const updatedOrders =
+          attachCloudOrderIdLocally(
+            order.id,
+            cloudOrder.orderId,
+          );
+
+        publishOrders(
+          updatedOrders,
+        );
+      }
+
+      const selections:
+        RefundSelections = {};
+
+      cloudOrder.items.forEach(
+        (item) => {
+          selections[
+            item.orderItemId
+          ] = {
+            quantity: 0,
+            restock: false,
+          };
+        },
+      );
+
+      setRefundSelections(
+        selections,
+      );
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load the cloud order for refund.",
+      );
+    } finally {
+      setIsRefundLoading(
+        false,
+      );
+    }
   };
 
   const openVoid = (
@@ -470,7 +615,7 @@ export function OrderHistoryModal({
   };
 
   const updateRefundQuantity = (
-    itemId: number,
+    itemId: string,
     nextQuantity: number,
     maximum: number,
   ) => {
@@ -505,7 +650,7 @@ export function OrderHistoryModal({
   };
 
   const toggleRefundRestock = (
-    itemId: number,
+    itemId: string,
     restock: boolean,
   ) => {
     setRefundSelections(
@@ -529,23 +674,23 @@ export function OrderHistoryModal({
 
   const selectAllRefundItems =
     () => {
-      if (!actionOrder) {
+      if (
+        !actionOrder ||
+        !cloudRefundOrder
+      ) {
         return;
       }
 
       const selections:
         RefundSelections = {};
 
-      actionOrder.items.forEach(
+      refundableItems.forEach(
         (item) => {
           selections[
-            String(item.id)
+            item.orderItemId
           ] = {
             quantity:
-              getRemainingRefundableQuantity(
-                actionOrder,
-                item.id,
-              ),
+              item.remainingQuantity,
             restock: false,
           };
         },
@@ -558,14 +703,15 @@ export function OrderHistoryModal({
     };
 
   const handleRefund =
-    () => {
+    async () => {
       if (
         !activeStaff ||
         !canManageOrders ||
-        !actionOrder
+        !actionOrder ||
+        !cloudRefundOrder
       ) {
         setActionError(
-          "A manager or supervisor must be signed in.",
+          "A manager or supervisor must be signed in and the cloud order must be loaded.",
         );
         return;
       }
@@ -591,32 +737,104 @@ export function OrderHistoryModal({
         return;
       }
 
+      const missingLocalMapping =
+        selectedRefundItems.find(
+          (item) =>
+            item.localProductId ===
+            null,
+        );
+
+      if (
+        missingLocalMapping
+      ) {
+        setActionError(
+          `Unable to match ${missingLocalMapping.name} to the current POS product list.`,
+        );
+        return;
+      }
+
+      setIsActionSubmitting(
+        true,
+      );
+
       try {
-        const updatedOrders =
-          refundOrder({
-            orderId:
-              actionOrder.id,
-            amount:
-              selectedRefundAmount,
-            items:
-              selectedRefundItems.map(
-                (item) => ({
-                  id: item.id,
-                  quantity:
-                    item.quantity,
-                  restock:
-                    item.restock,
-                }),
-              ),
-            reason:
-              actionReason,
-            performedBy: {
-              name:
+        const cloudResult =
+          await refundCloudOrder(
+            {
+              orderId:
+                cloudRefundOrder.orderId,
+              reason:
+                actionReason,
+              staffName:
                 activeStaff.name,
-              role:
+              staffRole:
                 activeStaff.role,
+              items:
+                selectedRefundItems.map(
+                  (item) => ({
+                    orderItemId:
+                      item.orderItemId,
+                    quantity:
+                      item.quantity,
+                    restock:
+                      item.restock,
+                  }),
+                ),
             },
-          });
+          );
+
+        const localRefundItems =
+          selectedRefundItems.map(
+            (item) => ({
+              id:
+                item.localProductId as number,
+              name:
+                item.name,
+              unitPrice:
+                item.price,
+              quantity:
+                item.quantity,
+              grossAmount:
+                Math.round(
+                  (
+                    item.price *
+                    item.quantity +
+                    Number.EPSILON
+                  ) *
+                    100,
+                ) / 100,
+              restocked:
+                item.restock,
+            }),
+          );
+
+        const updatedOrders =
+          recordCloudRefundLocally(
+            {
+              orderId:
+                actionOrder.id,
+              refundId:
+                cloudResult.refundId,
+              amount:
+                cloudResult.refundedGross,
+              netAmount:
+                cloudResult.refundedNet,
+              vatAmount:
+                cloudResult.refundedVat,
+              items:
+                localRefundItems,
+              reason:
+                actionReason,
+              performedBy: {
+                name:
+                  activeStaff.name,
+                role:
+                  activeStaff.role,
+              },
+              status:
+                cloudResult.orderStatus,
+            },
+          );
 
         const restoreByProductId =
           new Map<number, number>();
@@ -628,11 +846,14 @@ export function OrderHistoryModal({
           )
           .forEach(
             (item) => {
+              const localProductId =
+                item.localProductId as number;
+
               restoreByProductId.set(
-                item.id,
+                localProductId,
                 (
                   restoreByProductId.get(
-                    item.id,
+                    localProductId,
                   ) ?? 0
                 ) +
                   item.quantity,
@@ -668,22 +889,27 @@ export function OrderHistoryModal({
         const stockMovements =
           selectedRefundItems.flatMap(
             (item) => {
-              if (!item.restock) {
+              if (
+                !item.restock
+              ) {
                 return [];
               }
+
+              const localProductId =
+                item.localProductId as number;
 
               const previousProduct =
                 products.find(
                   (product) =>
                     product.id ===
-                    item.id,
+                    localProductId,
                 );
 
               const restoredProduct =
                 restoredProducts.find(
                   (product) =>
                     product.id ===
-                    item.id,
+                    localProductId,
                 );
 
               if (
@@ -710,11 +936,11 @@ export function OrderHistoryModal({
                     newStock:
                       restoredProduct.stockQuantity,
                     note:
-                      `Returned to stock from refund on order #${actionOrder.orderNumber}. ${actionReason.trim()}`,
+                      `Cloud refund on order #${cloudResult.orderNumber}. ${actionReason.trim()}`,
                     orderId:
                       actionOrder.id,
                     orderNumber:
-                      actionOrder.orderNumber,
+                      cloudResult.orderNumber,
                     performedBy: {
                       name:
                         activeStaff.name,
@@ -751,9 +977,9 @@ export function OrderHistoryModal({
             : " No items were returned to sellable stock.";
 
         setNotice(
-          `Refund of ${currencyFormatter.format(
-            selectedRefundAmount,
-          )} recorded for order #${actionOrder.orderNumber}.${restockMessage}`,
+          `Cloud refund of ${currencyFormatter.format(
+            cloudResult.refundedGross,
+          )} completed for order #${cloudResult.orderNumber}.${restockMessage}`,
         );
 
         closeActionModal();
@@ -762,13 +988,17 @@ export function OrderHistoryModal({
           error instanceof
             Error
             ? error.message
-            : "Unable to process the refund.",
+            : "Unable to process the cloud refund.",
+        );
+      } finally {
+        setIsActionSubmitting(
+          false,
         );
       }
     };
 
   const handleVoid =
-    () => {
+    async () => {
       if (
         !activeStaff ||
         !canManageOrders ||
@@ -780,20 +1010,65 @@ export function OrderHistoryModal({
         return;
       }
 
+      if (
+        !actionReason.trim()
+      ) {
+        setActionError(
+          "Enter a void reason.",
+        );
+        return;
+      }
+
+      setIsActionSubmitting(
+        true,
+      );
+
       try {
-        const updatedOrders =
-          voidOrder({
-            orderId:
-              actionOrder.id,
-            reason:
-              actionReason,
-            performedBy: {
-              name:
+        const cloudResult =
+          await voidCloudOrder(
+            {
+              identity: {
+                cloudOrderId:
+                  actionOrder.cloudOrderId,
+                orderNumber:
+                  actionOrder.orderNumber,
+                subtotal:
+                  actionOrder.subtotal,
+                orderType:
+                  actionOrder.orderType,
+                paymentMethod:
+                  actionOrder.paymentMethod,
+                createdAt:
+                  actionOrder.createdAt,
+              },
+              reason:
+                actionReason,
+              staffName:
                 activeStaff.name,
-              role:
+              staffRole:
                 activeStaff.role,
             },
-          });
+          );
+
+        const updatedOrders =
+          recordCloudVoidLocally(
+            {
+              orderId:
+                actionOrder.id,
+              cloudOrderId:
+                cloudResult.orderId,
+              reason:
+                actionReason,
+              performedBy: {
+                name:
+                  activeStaff.name,
+                role:
+                  activeStaff.role,
+              },
+              voidedAt:
+                cloudResult.voidedAt,
+            },
+          );
 
         const quantityByProductId =
           new Map<number, number>();
@@ -806,7 +1081,8 @@ export function OrderHistoryModal({
                 quantityByProductId.get(
                   item.id,
                 ) ?? 0
-              ) + item.quantity,
+              ) +
+                item.quantity,
             );
           },
         );
@@ -821,7 +1097,8 @@ export function OrderHistoryModal({
 
               if (
                 !product.trackStock ||
-                quantityToRestore <= 0
+                quantityToRestore <=
+                  0
               ) {
                 return product;
               }
@@ -876,11 +1153,11 @@ export function OrderHistoryModal({
                     newStock:
                       restoredProduct.stockQuantity,
                     note:
-                      `Stock restored after voiding order #${actionOrder.orderNumber}. ${actionReason.trim()}`,
+                      `Cloud void on order #${cloudResult.orderNumber}. ${actionReason.trim()}`,
                     orderId:
                       actionOrder.id,
                     orderNumber:
-                      actionOrder.orderNumber,
+                      cloudResult.orderNumber,
                     performedBy: {
                       name:
                         activeStaff.name,
@@ -906,7 +1183,7 @@ export function OrderHistoryModal({
         );
 
         setNotice(
-          `Order #${actionOrder.orderNumber} was voided and its tracked stock was restored.`,
+          `Order #${cloudResult.orderNumber} was voided in the cloud and its tracked stock was restored.`,
         );
 
         closeActionModal();
@@ -915,7 +1192,11 @@ export function OrderHistoryModal({
           error instanceof
             Error
             ? error.message
-            : "Unable to void the order.",
+            : "Unable to void the cloud order.",
+        );
+      } finally {
+        setIsActionSubmitting(
+          false,
         );
       }
     };
@@ -1953,6 +2234,12 @@ export function OrderHistoryModal({
               {actionType ===
                 "refund" && (
                 <div className="mt-5">
+                  {isRefundLoading ? (
+                    <div className="rounded-xl bg-slate-100 p-5 text-sm font-bold text-slate-600">
+                      Loading refundable items from Supabase...
+                    </div>
+                  ) : (
+                    <>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-black text-slate-700">
@@ -1966,6 +2253,9 @@ export function OrderHistoryModal({
 
                     <button
                       type="button"
+                      disabled={
+                        isRefundLoading
+                      }
                       onClick={
                         selectAllRefundItems
                       }
@@ -2146,6 +2436,8 @@ export function OrderHistoryModal({
                       )}
                     </p>
                   </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -2211,23 +2503,33 @@ export function OrderHistoryModal({
 
                 <button
                   type="button"
+                  disabled={
+                    isActionSubmitting ||
+                    (
+                      actionType ===
+                        "refund" &&
+                      isRefundLoading
+                    )
+                  }
                   onClick={
                     actionType ===
                     "refund"
                       ? handleRefund
                       : handleVoid
                   }
-                  className={`rounded-xl px-5 py-3 font-bold text-white ${
+                  className={`rounded-xl px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
                     actionType ===
                     "refund"
                       ? "bg-purple-600 hover:bg-purple-700"
                       : "bg-red-600 hover:bg-red-700"
                   }`}
                 >
-                  {actionType ===
-                  "refund"
-                    ? "Confirm refund"
-                    : "Confirm void"}
+                  {isActionSubmitting
+                    ? "Processing..."
+                    : actionType ===
+                        "refund"
+                      ? "Confirm refund"
+                      : "Confirm void"}
                 </button>
               </div>
             </section>
