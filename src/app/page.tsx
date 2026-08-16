@@ -36,6 +36,10 @@ import {
 } from "@/components/StaffManagementModal";
 
 import {
+  BusinessSettingsModal,
+} from "@/components/BusinessSettingsModal";
+
+import {
   addInventoryMovements,
   createInventoryMovement,
 } from "@/lib/inventoryStorage";
@@ -57,12 +61,18 @@ import {
 } from "@/lib/cloudStaff";
 
 import {
+  getPosTemplateLabel,
+  getTerminalLabel,
+  loadCloudBusinessSettings,
+  type CloudBusinessSettings,
+} from "@/lib/cloudBusiness";
+
+import {
   DEFAULT_PRODUCTS,
   deductStockForItems,
   getProductStockStatus,
   isProductSellable,
   loadMenu,
-  menuCategories,
   saveMenu,
   validateStockForItems,
   type Category,
@@ -88,11 +98,6 @@ import {
   calculateTaxBreakdown,
   type TaxType,
 } from "@/lib/tax";
-
-const categories = [
-  "All",
-  ...menuCategories,
-] as const;
 
 type SelectedCategory =
   | "All"
@@ -147,8 +152,22 @@ export default function Home() {
     setProducts,
   ] =
     useState<Product[]>(
-      DEFAULT_PRODUCTS,
+      [],
     );
+
+  const [
+    menuCategoryNames,
+    setMenuCategoryNames,
+  ] =
+    useState<Category[]>(
+      [],
+    );
+
+  const [
+    productSearch,
+    setProductSearch,
+  ] =
+    useState("");
 
   const [
     menuSource,
@@ -240,8 +259,42 @@ export default function Home() {
     setIsStaffManagementOpen,
   ] = useState(false);
 
+  const [
+    businessSettings,
+    setBusinessSettings,
+  ] =
+    useState<CloudBusinessSettings | null>(
+      null,
+    );
+
+  const [
+    isBusinessSettingsOpen,
+    setIsBusinessSettingsOpen,
+  ] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
+
+    const loadBusinessSettings =
+      async () => {
+        try {
+          const settings =
+            await loadCloudBusinessSettings();
+
+          if (!cancelled) {
+            setBusinessSettings(
+              settings,
+            );
+          }
+        } catch (error) {
+          console.error(
+            "Unable to load business settings:",
+            error,
+          );
+        }
+      };
+
+    void loadBusinessSettings();
 
     const storedStaff =
       loadActiveStaff();
@@ -312,18 +365,11 @@ export default function Home() {
       void validateStoredStaff();
     }
 
-    // Keep the existing local menu available immediately.
-    // This is our fallback if Supabase cannot be reached.
+    // Local menu is used only if cloud loading fails.
+    // We no longer show Fast Food demo products before we know
+    // which business/template is signed in.
     const storedProducts =
       loadMenu();
-
-    setProducts(
-      storedProducts,
-    );
-
-    setMenuSource(
-      "LOCAL",
-    );
 
     const existingOrders =
       loadOrders();
@@ -379,6 +425,10 @@ export default function Home() {
 
           setProducts(
             cloudMenu.products,
+          );
+
+          setMenuCategoryNames(
+            cloudMenu.categories,
           );
 
           setCloudLocationId(
@@ -478,6 +528,17 @@ export default function Home() {
             storedProducts,
           );
 
+          setMenuCategoryNames(
+            Array.from(
+              new Set(
+                storedProducts.map(
+                  (product) =>
+                    product.category,
+                ),
+              ),
+            ),
+          );
+
           setCloudLocationId(
             null,
           );
@@ -515,27 +576,86 @@ export default function Home() {
     activeStaff?.role ===
     "Manager";
 
+  const canManageBusinessSettings =
+    activeStaff?.role ===
+    "Manager";
+
   const canViewSalesReport =
     activeStaff?.role ===
     "Manager";
 
+  const categories =
+    useMemo(
+      () => [
+        "All",
+        ...menuCategoryNames,
+      ],
+      [
+        menuCategoryNames,
+      ],
+    );
+
+  const isDeliTemplate =
+    businessSettings?.posTemplate ===
+    "DELI";
+
+  useEffect(() => {
+    if (
+      selectedCategory ===
+        "All" ||
+      menuCategoryNames.includes(
+        selectedCategory,
+      )
+    ) {
+      return;
+    }
+
+    setSelectedCategory(
+      "All",
+    );
+  }, [
+    menuCategoryNames,
+    selectedCategory,
+  ]);
+
   const filteredProducts =
     useMemo(() => {
-      if (
-        selectedCategory ===
-        "All"
-      ) {
-        return products;
-      }
+      const searchValue =
+        productSearch
+          .trim()
+          .toLowerCase();
 
       return products.filter(
-        (product) =>
-          product.category ===
-          selectedCategory,
+        (product) => {
+          const matchesCategory =
+            selectedCategory ===
+              "All" ||
+            product.category ===
+              selectedCategory;
+
+          const matchesSearch =
+            !searchValue ||
+            product.name
+              .toLowerCase()
+              .includes(
+                searchValue,
+              ) ||
+            product.description
+              .toLowerCase()
+              .includes(
+                searchValue,
+              );
+
+          return (
+            matchesCategory &&
+            matchesSearch
+          );
+        },
       );
     }, [
       products,
       selectedCategory,
+      productSearch,
     ]);
 
   const lowStockCount =
@@ -621,6 +741,9 @@ export default function Home() {
         false,
       );
       setIsStaffManagementOpen(
+        false,
+      );
+      setIsBusinessSettingsOpen(
         false,
       );
       setIsStaffLoginOpen(
@@ -1248,11 +1371,17 @@ export default function Home() {
       <header className="flex flex-wrap items-center justify-between gap-4 bg-slate-950 px-6 py-4 text-white shadow-lg">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-orange-400">
-            Chicken Shop POS
+            {businessSettings
+              ? `${businessSettings.businessName} POS`
+              : "POS Platform"}
           </p>
 
           <h1 className="text-2xl font-black">
-            Cashier Terminal
+            {businessSettings
+              ? getTerminalLabel(
+                  businessSettings.posTemplate,
+                )
+              : "Cashier Terminal"}
           </h1>
         </div>
 
@@ -1317,6 +1446,20 @@ export default function Home() {
             </button>
           )}
 
+          {canManageBusinessSettings && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsBusinessSettingsOpen(
+                  true,
+                )
+              }
+              className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+            >
+              Business
+            </button>
+          )}
+
           {canViewSalesReport && (
             <button
               type="button"
@@ -1357,7 +1500,8 @@ export default function Home() {
 
           <div className="text-right">
             <p className="text-sm font-semibold">
-              Main Branch
+              {businessSettings?.locationName ??
+                "Main Branch"}
             </p>
 
             <p className="text-xs text-slate-400">
@@ -1365,6 +1509,15 @@ export default function Home() {
                 ? `${activeStaff.role}: ${activeStaff.name}`
                 : "No staff signed in"}
             </p>
+
+            {businessSettings && (
+              <p className="mt-1 text-[11px] font-bold text-orange-300">
+                {getPosTemplateLabel(
+                  businessSettings.posTemplate,
+                )}{" "}
+                template
+              </p>
+            )}
 
             <p
               className={`mt-1 text-[11px] font-bold ${
@@ -1394,7 +1547,14 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="grid min-h-[calc(100vh-76px)] grid-cols-1 xl:grid-cols-[150px_minmax(0,1fr)_390px]">
+      <div
+        className={`grid min-h-[calc(100vh-76px)] grid-cols-1 ${
+          isDeliTemplate
+            ? "xl:grid-cols-[minmax(0,1fr)_420px]"
+            : "xl:grid-cols-[150px_minmax(0,1fr)_390px]"
+        }`}
+      >
+        {!isDeliTemplate && (
         <aside className="border-r border-slate-200 bg-white p-3">
           <p className="mb-3 px-3 pt-2 text-xs font-bold uppercase tracking-wider text-slate-400">
             Categories
@@ -1435,20 +1595,21 @@ export default function Home() {
             )}
           </div>
         </aside>
+        )}
 
         <section className="min-w-0 p-5">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-slate-500">
-                Select products
-                to add them to the
-                order
+                {isDeliTemplate
+                  ? "Build the customer order from the deli counter"
+                  : "Select products to add them to the order"}
               </p>
 
               <h2 className="text-2xl font-black">
-                {
-                  selectedCategory
-                }
+                {isDeliTemplate
+                  ? "Deli Counter"
+                  : selectedCategory}
               </h2>
             </div>
 
@@ -1486,6 +1647,74 @@ export default function Home() {
               )}
             </div>
           </div>
+
+          {isDeliTemplate && (
+            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-950">
+                    Deli categories
+                  </p>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    Choose a counter
+                    section or search
+                    the menu.
+                  </p>
+                </div>
+
+                <input
+                  type="search"
+                  value={
+                    productSearch
+                  }
+                  onChange={(
+                    event,
+                  ) =>
+                    setProductSearch(
+                      event.target
+                        .value,
+                    )
+                  }
+                  placeholder="Search sandwiches, paninis, drinks..."
+                  className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-500 sm:w-80"
+                />
+              </div>
+
+              <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                {categories.map(
+                  (category) => {
+                    const selected =
+                      category ===
+                      selectedCategory;
+
+                    return (
+                      <button
+                        key={
+                          category
+                        }
+                        type="button"
+                        onClick={() =>
+                          setSelectedCategory(
+                            category,
+                          )
+                        }
+                        className={`shrink-0 rounded-xl px-4 py-3 text-sm font-black transition ${
+                          selected
+                            ? "bg-orange-500 text-white shadow-sm"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        }`}
+                      >
+                        {
+                          category
+                        }
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div>
@@ -1537,7 +1766,13 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 2xl:grid-cols-4">
+          <div
+            className={`grid gap-4 ${
+              isDeliTemplate
+                ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+                : "grid-cols-2 md:grid-cols-3 2xl:grid-cols-4"
+            }`}
+          >
             {filteredProducts.map(
               (
                 product,
@@ -1566,7 +1801,11 @@ export default function Home() {
                         product,
                       )
                     }
-                    className={`relative min-h-48 rounded-2xl border p-5 text-left shadow-sm transition ${
+                    className={`relative rounded-2xl border p-5 text-left shadow-sm transition ${
+                      isDeliTemplate
+                        ? "min-h-40"
+                        : "min-h-48"
+                    } ${
                       sellable
                         ? "border-slate-200 bg-white hover:-translate-y-1 hover:border-orange-400 hover:shadow-lg"
                         : "cursor-not-allowed border-slate-200 bg-slate-200 opacity-60"
@@ -1597,7 +1836,13 @@ export default function Home() {
                         </span>
                       )}
 
-                    <span className="block text-5xl">
+                    <span
+                      className={`block ${
+                        isDeliTemplate
+                          ? "text-4xl"
+                          : "text-5xl"
+                      }`}
+                    >
                       {
                         product.emoji
                       }
@@ -1631,6 +1876,27 @@ export default function Home() {
                   </button>
                 );
               },
+            )}
+
+            {filteredProducts.length ===
+              0 && (
+              <div className="col-span-full rounded-2xl border-2 border-dashed border-slate-300 bg-white p-10 text-center">
+                <p className="text-4xl">
+                  {isDeliTemplate
+                    ? "🥪"
+                    : "📦"}
+                </p>
+
+                <h3 className="mt-3 font-black text-slate-900">
+                  No products here yet
+                </h3>
+
+                <p className="mt-2 text-sm text-slate-500">
+                  {isDeliTemplate
+                    ? "Use Manage Menu to add the deli's first sandwiches, paninis, drinks or other products."
+                    : "No products match this category."}
+                </p>
+              </div>
             )}
           </div>
         </section>
@@ -1916,6 +2182,26 @@ export default function Home() {
         }
       />
 
+      <BusinessSettingsModal
+        isOpen={
+          isBusinessSettingsOpen
+        }
+        settings={
+          businessSettings
+        }
+        activeStaff={
+          activeStaff
+        }
+        onSettingsChange={
+          setBusinessSettings
+        }
+        onClose={() =>
+          setIsBusinessSettingsOpen(
+            false,
+          )
+        }
+      />
+
       <StaffManagementModal
         isOpen={
           isStaffManagementOpen
@@ -1959,6 +2245,9 @@ export default function Home() {
         }
         products={
           products
+        }
+        categories={
+          menuCategoryNames
         }
         activeStaff={
           activeStaff

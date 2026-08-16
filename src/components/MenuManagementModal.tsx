@@ -18,7 +18,6 @@ import {
 
 import {
   getProductStockStatus,
-  menuCategories,
   type Category,
   type Product,
 } from "@/lib/menuStorage";
@@ -30,6 +29,7 @@ import type {
 type MenuManagementModalProps = {
   isOpen: boolean;
   products: Product[];
+  categories: Category[];
   activeStaff: StaffMember | null;
   onClose: () => void;
   onProductsChange: (
@@ -51,19 +51,25 @@ type ProductForm = {
   lowStockThreshold: string;
 };
 
-const emptyForm: ProductForm = {
-  id: null,
-  cloudId: null,
-  name: "",
-  description: "",
-  category: "Meals",
-  price: "",
-  emoji: "🍗",
-  available: true,
-  trackStock: true,
-  stockQuantity: "0",
-  lowStockThreshold: "5",
-};
+function createEmptyForm(
+  defaultCategory:
+    Category,
+): ProductForm {
+  return {
+    id: null,
+    cloudId: null,
+    name: "",
+    description: "",
+    category:
+      defaultCategory,
+    price: "",
+    emoji: "🍽️",
+    available: true,
+    trackStock: true,
+    stockQuantity: "0",
+    lowStockThreshold: "5",
+  };
+}
 
 const currencyFormatter =
   new Intl.NumberFormat(
@@ -124,10 +130,15 @@ function getStockBadge(
 export function MenuManagementModal({
   isOpen,
   products,
+  categories,
   activeStaff,
   onClose,
   onProductsChange,
 }: MenuManagementModalProps) {
+  const defaultCategory =
+    categories[0] ??
+    "Other";
+
   const [
     draftProducts,
     setDraftProducts,
@@ -139,7 +150,9 @@ export function MenuManagementModal({
     setForm,
   ] =
     useState<ProductForm>(
-      emptyForm,
+      createEmptyForm(
+        defaultCategory,
+      ),
     );
 
   const [
@@ -188,7 +201,9 @@ export function MenuManagementModal({
     );
 
     setForm(
-      emptyForm,
+      createEmptyForm(
+        defaultCategory,
+      ),
     );
 
     setSearch("");
@@ -255,7 +270,9 @@ export function MenuManagementModal({
   const resetForm =
     () => {
       setForm(
-        emptyForm,
+        createEmptyForm(
+          defaultCategory,
+        ),
       );
 
       setError("");
@@ -502,7 +519,9 @@ export function MenuManagementModal({
         await refreshCloudProducts();
 
         setForm(
-          emptyForm,
+          createEmptyForm(
+            defaultCategory,
+          ),
         );
 
         setSuccess(
@@ -644,7 +663,9 @@ export function MenuManagementModal({
           product.id
         ) {
           setForm(
-            emptyForm,
+            createEmptyForm(
+              defaultCategory,
+            ),
           );
         }
 
@@ -1014,7 +1035,7 @@ export function MenuManagementModal({
                     }
                     className="mt-2 w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-3 outline-none focus:border-orange-500 disabled:bg-slate-100"
                   >
-                    {menuCategories.map(
+                    {categories.map(
                       (
                         category,
                       ) => (
@@ -1283,12 +1304,23 @@ export function MenuManagementModal({
                 />
               </label>
 
+              {categories.length ===
+                0 && (
+                <p className="rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">
+                  No active categories
+                  exist for this
+                  business yet.
+                </p>
+              )}
+
               <button
                 type="button"
                 disabled={
                   isSubmitting ||
                   busyProductId !==
-                    null
+                    null ||
+                  categories.length ===
+                    0
                 }
                 onClick={() => {
                   void saveProduct();

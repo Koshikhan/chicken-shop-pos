@@ -2,19 +2,12 @@
 
 import {
   DEFAULT_PRODUCTS,
-  menuCategories,
-  type Category,
   type Product,
 } from "@/lib/menuStorage";
 
 import {
   createClient,
 } from "@/lib/supabase/client";
-
-type CloudMembership = {
-  business_id: string;
-  default_location_id: string | null;
-};
 
 type CloudCategory = {
   id: string;
@@ -40,17 +33,10 @@ type CloudInventory = {
 
 export type CloudMenuResult = {
   products: Product[];
+  categories: string[];
   businessId: string;
   locationId: string;
 };
-
-function isCategory(
-  value: string,
-): value is Category {
-  return menuCategories.includes(
-    value as Category,
-  );
-}
 
 function getLegacyNumericId(
   cloudProduct: CloudProduct,
@@ -66,9 +52,6 @@ function getLegacyNumericId(
     return matchingDefault.id;
   }
 
-  // Existing POS code still uses numeric IDs in the cart.
-  // Derive a stable compatibility ID from the cloud UUID so
-  // a newly added product keeps the same local ID after reload.
   let hash = 0;
 
   for (
@@ -168,6 +151,12 @@ export async function loadCloudMenu():
         .eq(
           "is_active",
           true,
+        )
+        .order(
+          "name",
+          {
+            ascending: true,
+          },
         ),
 
       supabase
@@ -183,7 +172,12 @@ export async function loadCloudMenu():
           "is_active",
           true,
         )
-        .order("name"),
+        .order(
+          "name",
+          {
+            ascending: true,
+          },
+        ),
 
       supabase
         .from("inventory")
@@ -196,35 +190,47 @@ export async function loadCloudMenu():
         ),
     ]);
 
-  if (categoriesResult.error) {
+  if (
+    categoriesResult.error
+  ) {
     throw new Error(
       categoriesResult.error.message,
     );
   }
 
-  if (productsResult.error) {
+  if (
+    productsResult.error
+  ) {
     throw new Error(
       productsResult.error.message,
     );
   }
 
-  if (inventoryResult.error) {
+  if (
+    inventoryResult.error
+  ) {
     throw new Error(
       inventoryResult.error.message,
     );
   }
 
   const categories =
-    (categoriesResult.data ??
-      []) as CloudCategory[];
+    (
+      categoriesResult.data ??
+      []
+    ) as CloudCategory[];
 
   const cloudProducts =
-    (productsResult.data ??
-      []) as CloudProduct[];
+    (
+      productsResult.data ??
+      []
+    ) as CloudProduct[];
 
   const inventory =
-    (inventoryResult.data ??
-      []) as CloudInventory[];
+    (
+      inventoryResult.data ??
+      []
+    ) as CloudInventory[];
 
   const categoryById =
     new Map(
@@ -246,11 +252,10 @@ export async function loadCloudMenu():
       ),
     );
 
-  const products: Product[] =
+  const products:
+    Product[] =
     cloudProducts.flatMap(
-      (
-        cloudProduct,
-      ) => {
+      (cloudProduct) => {
         const categoryName =
           cloudProduct.category_id
             ? categoryById.get(
@@ -258,14 +263,9 @@ export async function loadCloudMenu():
               )
             : undefined;
 
-        if (
-          !categoryName ||
-          !isCategory(
-            categoryName,
-          )
-        ) {
+        if (!categoryName) {
           console.warn(
-            `Skipping ${cloudProduct.name}: unsupported category ${categoryName ?? "none"}.`,
+            `Skipping ${cloudProduct.name}: no active category was found.`,
           );
 
           return [];
@@ -277,29 +277,41 @@ export async function loadCloudMenu():
               getLegacyNumericId(
                 cloudProduct,
               ),
+
             cloudId:
               cloudProduct.id,
-            source: "CLOUD",
+
+            source:
+              "CLOUD",
+
             name:
               cloudProduct.name,
+
             description:
               cloudProduct.description,
+
             category:
               categoryName,
+
             price:
               Number(
                 cloudProduct.price,
               ),
+
             emoji:
               cloudProduct.emoji,
+
             available:
               cloudProduct.available,
+
             trackStock:
               cloudProduct.track_stock,
+
             stockQuantity:
               stockByProductId.get(
                 cloudProduct.id,
               ) ?? 0,
+
             lowStockThreshold:
               cloudProduct.low_stock_threshold,
           },
@@ -307,16 +319,18 @@ export async function loadCloudMenu():
       },
     );
 
-  if (products.length === 0) {
-    throw new Error(
-      "No cloud products were returned.",
-    );
-  }
-
   return {
     products,
+
+    categories:
+      categories.map(
+        (category) =>
+          category.name,
+      ),
+
     businessId:
       membership.business_id,
+
     locationId:
       membership.default_location_id,
   };

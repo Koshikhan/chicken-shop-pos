@@ -7,8 +7,12 @@ export const menuCategories = [
   "Drinks",
 ] as const;
 
-export type Category =
-  (typeof menuCategories)[number];
+/**
+ * Categories are now business-defined.
+ *
+ * menuCategories remains only as the Fast Food local fallback.
+ */
+export type Category = string;
 
 export type ProductSource =
   | "LOCAL"
@@ -16,8 +20,12 @@ export type ProductSource =
 
 export type Product = {
   id: number;
+
+  // Real Supabase UUID for cloud-backed products.
   cloudId?: string;
+
   source?: ProductSource;
+
   name: string;
   description: string;
   category: Category;
@@ -43,6 +51,7 @@ export type ProductStockStatus =
 export const DEFAULT_PRODUCTS: Product[] = [
   {
     id: 1,
+    source: "LOCAL",
     name: "2 Piece Chicken Meal",
     description: "2 chicken pieces, fries and drink",
     category: "Meals",
@@ -52,10 +61,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 30,
     lowStockThreshold: 5,
-    source: "LOCAL",
   },
   {
     id: 2,
+    source: "LOCAL",
     name: "Spicy Burger Meal",
     description: "Spicy burger, fries and drink",
     category: "Meals",
@@ -65,10 +74,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 25,
     lowStockThreshold: 5,
-    source: "LOCAL",
   },
   {
     id: 3,
+    source: "LOCAL",
     name: "Family Bucket",
     description: "10 chicken pieces and 4 fries",
     category: "Meals",
@@ -78,10 +87,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 10,
     lowStockThreshold: 3,
-    source: "LOCAL",
   },
   {
     id: 4,
+    source: "LOCAL",
     name: "Chicken Piece",
     description: "Original fried chicken",
     category: "Chicken",
@@ -91,10 +100,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 60,
     lowStockThreshold: 10,
-    source: "LOCAL",
   },
   {
     id: 5,
+    source: "LOCAL",
     name: "6 Hot Wings",
     description: "Six spicy chicken wings",
     category: "Chicken",
@@ -104,10 +113,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 30,
     lowStockThreshold: 6,
-    source: "LOCAL",
   },
   {
     id: 6,
+    source: "LOCAL",
     name: "12 Hot Wings",
     description: "Twelve spicy chicken wings",
     category: "Chicken",
@@ -117,10 +126,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 20,
     lowStockThreshold: 5,
-    source: "LOCAL",
   },
   {
     id: 7,
+    source: "LOCAL",
     name: "Classic Chicken Burger",
     description: "Chicken fillet, lettuce and mayo",
     category: "Burgers",
@@ -130,10 +139,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 35,
     lowStockThreshold: 6,
-    source: "LOCAL",
   },
   {
     id: 8,
+    source: "LOCAL",
     name: "Spicy Tower Burger",
     description: "Spicy fillet, hash brown and cheese",
     category: "Burgers",
@@ -143,10 +152,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 25,
     lowStockThreshold: 5,
-    source: "LOCAL",
   },
   {
     id: 9,
+    source: "LOCAL",
     name: "Chicken Wrap",
     description: "Chicken strips, salad and sauce",
     category: "Wraps",
@@ -156,10 +165,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 30,
     lowStockThreshold: 5,
-    source: "LOCAL",
   },
   {
     id: 10,
+    source: "LOCAL",
     name: "Regular Fries",
     description: "Crispy seasoned fries",
     category: "Sides",
@@ -169,10 +178,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 50,
     lowStockThreshold: 10,
-    source: "LOCAL",
   },
   {
     id: 11,
+    source: "LOCAL",
     name: "Coleslaw",
     description: "Fresh creamy coleslaw",
     category: "Sides",
@@ -182,10 +191,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 20,
     lowStockThreshold: 5,
-    source: "LOCAL",
   },
   {
     id: 12,
+    source: "LOCAL",
     name: "Pepsi",
     description: "330ml canned drink",
     category: "Drinks",
@@ -195,10 +204,10 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 48,
     lowStockThreshold: 12,
-    source: "LOCAL",
   },
   {
     id: 13,
+    source: "LOCAL",
     name: "Water",
     description: "500ml bottled water",
     category: "Drinks",
@@ -208,27 +217,26 @@ export const DEFAULT_PRODUCTS: Product[] = [
     trackStock: true,
     stockQuantity: 0,
     lowStockThreshold: 10,
-    source: "LOCAL",
   },
 ];
 
 const MENU_STORAGE_KEY =
   "chicken-shop-pos-menu";
 
-type LegacyProduct =
+type StoredProduct =
   Partial<Product> & {
     id: number;
     name: string;
     description: string;
-    category: Category;
+    category: string;
     price: number;
     emoji: string;
     available: boolean;
   };
 
-function isLegacyProduct(
+function isStoredProduct(
   value: unknown,
-): value is LegacyProduct {
+): value is StoredProduct {
   if (
     typeof value !== "object" ||
     value === null
@@ -243,13 +251,12 @@ function isLegacyProduct(
     typeof product.id === "number" &&
     typeof product.name === "string" &&
     typeof product.description === "string" &&
+    typeof product.category === "string" &&
+    product.category.trim().length > 0 &&
     typeof product.price === "number" &&
     Number.isFinite(product.price) &&
     typeof product.emoji === "string" &&
-    typeof product.available === "boolean" &&
-    menuCategories.includes(
-      product.category as Category,
-    )
+    typeof product.available === "boolean"
   );
 }
 
@@ -271,38 +278,63 @@ function toNonNegativeInteger(
 }
 
 export function normaliseProduct(
-  product: LegacyProduct,
+  product: StoredProduct,
 ): Product {
   const trackStock =
-    typeof product.trackStock === "boolean"
+    typeof product.trackStock ===
+      "boolean"
       ? product.trackStock
       : true;
 
   const defaultStock =
-    product.available ? 20 : 0;
+    product.available
+      ? 20
+      : 0;
+
+  const source:
+    ProductSource =
+    product.source === "CLOUD"
+      ? "CLOUD"
+      : "LOCAL";
 
   return {
-    id: product.id,
+    id:
+      product.id,
+
     cloudId:
-      typeof product.cloudId === "string"
+      typeof product.cloudId ===
+        "string"
         ? product.cloudId
         : undefined,
-    source:
-      product.source === "CLOUD"
-        ? "CLOUD"
-        : "LOCAL",
-    name: product.name,
-    description: product.description,
-    category: product.category,
-    price: product.price,
-    emoji: product.emoji,
-    available: product.available,
+
+    source,
+
+    name:
+      product.name,
+
+    description:
+      product.description,
+
+    category:
+      product.category.trim(),
+
+    price:
+      product.price,
+
+    emoji:
+      product.emoji,
+
+    available:
+      product.available,
+
     trackStock,
+
     stockQuantity:
       toNonNegativeInteger(
         product.stockQuantity,
         defaultStock,
       ),
+
     lowStockThreshold:
       toNonNegativeInteger(
         product.lowStockThreshold,
@@ -311,8 +343,12 @@ export function normaliseProduct(
   };
 }
 
-export function loadMenu(): Product[] {
-  if (typeof window === "undefined") {
+export function loadMenu():
+  Product[] {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
     return DEFAULT_PRODUCTS;
   }
 
@@ -326,13 +362,18 @@ export function loadMenu(): Product[] {
       return DEFAULT_PRODUCTS;
     }
 
-    const parsedMenu: unknown =
-      JSON.parse(storedMenu);
+    const parsedMenu:
+      unknown =
+      JSON.parse(
+        storedMenu,
+      );
 
     if (
-      !Array.isArray(parsedMenu) ||
+      !Array.isArray(
+        parsedMenu,
+      ) ||
       !parsedMenu.every(
-        isLegacyProduct,
+        isStoredProduct,
       )
     ) {
       return DEFAULT_PRODUCTS;
@@ -354,7 +395,10 @@ export function loadMenu(): Product[] {
 export function saveMenu(
   products: Product[],
 ) {
-  if (typeof window === "undefined") {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
     return;
   }
 
@@ -382,7 +426,10 @@ export function getProductStockStatus(
     return "UNTRACKED";
   }
 
-  if (product.stockQuantity <= 0) {
+  if (
+    product.stockQuantity <=
+    0
+  ) {
     return "OUT_OF_STOCK";
   }
 
@@ -403,7 +450,8 @@ export function isProductSellable(
     product.available &&
     (
       !product.trackStock ||
-      product.stockQuantity > 0
+      product.stockQuantity >
+        0
     )
   );
 }
@@ -412,11 +460,14 @@ export function validateStockForItems(
   products: Product[],
   items: StockItemRequest[],
 ) {
-  for (const item of items) {
+  for (
+    const item of items
+  ) {
     const product =
       products.find(
         (candidate) =>
-          candidate.id === item.id,
+          candidate.id ===
+          item.id,
       );
 
     if (!product) {
