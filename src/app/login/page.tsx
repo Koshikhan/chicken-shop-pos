@@ -109,6 +109,19 @@ export default function LoginPage() {
           );
         }
 
+        if (
+          status.businessStatus ===
+          "SUSPENDED"
+        ) {
+          router.replace(
+            "/suspended",
+          );
+
+          router.refresh();
+
+          return;
+        }
+
         router.replace(
           "/",
         );

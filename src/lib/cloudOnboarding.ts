@@ -10,12 +10,18 @@ export type OnboardingBusinessType =
   | "RESTAURANT"
   | "RETAIL";
 
+export type BusinessAccountStatus =
+  | "ACTIVE"
+  | "SUSPENDED";
+
 export type PosOnboardingStatus = {
   hasBusiness: boolean;
   businessId: string | null;
   businessName: string | null;
   posTemplate:
     OnboardingBusinessType | null;
+  businessStatus:
+    BusinessAccountStatus | null;
 };
 
 export async function getPosOnboardingStatus():
@@ -44,7 +50,7 @@ export async function getPosOnboardingStatus():
 
   if (!row) {
     throw new Error(
-      "Supabase did not return onboarding status.",
+      "Supabase did not return account status.",
     );
   }
 
@@ -76,9 +82,20 @@ export async function getPosOnboardingStatus():
             ) as OnboardingBusinessType
           )
         : null,
+
+    businessStatus:
+      row.business_status ===
+        "SUSPENDED"
+        ? "SUSPENDED"
+        : row.business_status ===
+            "ACTIVE"
+          ? "ACTIVE"
+          : null,
   };
 }
 
+// Kept only for compatibility with older code.
+// Public/self-service onboarding is disabled in the commercial flow.
 export async function createPosBusinessFromOnboarding(
   input: {
     businessName: string;

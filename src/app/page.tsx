@@ -7,6 +7,10 @@ import {
 } from "react";
 
 import {
+  useRouter,
+} from "next/navigation";
+
+import {
   InventoryManagementModal,
 } from "@/components/InventoryManagementModal";
 
@@ -40,6 +44,23 @@ import {
 } from "@/components/BusinessSettingsModal";
 
 import {
+  AccountMenu,
+} from "@/components/AccountMenu";
+
+import {
+  DeliPOS,
+} from "@/components/templates/DeliPOS";
+
+import {
+  FastFoodPOS,
+} from "@/components/templates/FastFoodPOS";
+
+import type {
+  OrderType,
+  SelectedCategory,
+} from "@/components/templates/templateTypes";
+
+import {
   addInventoryMovements,
   createInventoryMovement,
 } from "@/lib/inventoryStorage";
@@ -66,6 +87,10 @@ import {
   loadCloudBusinessSettings,
   type CloudBusinessSettings,
 } from "@/lib/cloudBusiness";
+
+import {
+  getPosOnboardingStatus,
+} from "@/lib/cloudOnboarding";
 
 import {
   DEFAULT_PRODUCTS,
@@ -99,15 +124,6 @@ import {
   type TaxType,
 } from "@/lib/tax";
 
-type SelectedCategory =
-  | "All"
-  | Category;
-
-type OrderType =
-  | "Takeaway"
-  | "Eat In"
-  | "Delivery";
-
 type CartItem =
   Product & {
     quantity: number;
@@ -123,6 +139,15 @@ const currencyFormatter =
   );
 
 export default function Home() {
+  const router =
+    useRouter();
+
+  const [
+    isBusinessAccessChecked,
+    setIsBusinessAccessChecked,
+  ] =
+    useState(false);
+
   const [
     selectedCategory,
     setSelectedCategory,
@@ -273,6 +298,84 @@ export default function Home() {
   ] = useState(false);
 
   useEffect(() => {
+    let cancelled =
+      false;
+
+    const checkBusinessAccess =
+      async () => {
+        try {
+          const status =
+            await getPosOnboardingStatus();
+
+          if (
+            cancelled
+          ) {
+            return;
+          }
+
+          if (
+            !status.hasBusiness
+          ) {
+            clearActiveStaff();
+
+            router.replace(
+              "/login",
+            );
+
+            return;
+          }
+
+          if (
+            status.businessStatus ===
+            "SUSPENDED"
+          ) {
+            clearActiveStaff();
+
+            router.replace(
+              "/suspended",
+            );
+
+            return;
+          }
+
+          setIsBusinessAccessChecked(
+            true,
+          );
+        } catch (
+          accessError
+        ) {
+          console.error(
+            "Unable to check business access:",
+            accessError,
+          );
+
+          if (
+            !cancelled
+          ) {
+            clearActiveStaff();
+
+            router.replace(
+              "/login",
+            );
+          }
+        }
+      };
+
+    void checkBusinessAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    router,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isBusinessAccessChecked
+    ) {
+      return;
+    }
     let cancelled = false;
 
     const loadBusinessSettings =
@@ -560,7 +663,9 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [
+    isBusinessAccessChecked,
+  ]);
 
   const canViewOrderHistory =
     activeStaff?.role ===
@@ -617,46 +722,6 @@ export default function Home() {
     menuCategoryNames,
     selectedCategory,
   ]);
-
-  const filteredProducts =
-    useMemo(() => {
-      const searchValue =
-        productSearch
-          .trim()
-          .toLowerCase();
-
-      return products.filter(
-        (product) => {
-          const matchesCategory =
-            selectedCategory ===
-              "All" ||
-            product.category ===
-              selectedCategory;
-
-          const matchesSearch =
-            !searchValue ||
-            product.name
-              .toLowerCase()
-              .includes(
-                searchValue,
-              ) ||
-            product.description
-              .toLowerCase()
-              .includes(
-                searchValue,
-              );
-
-          return (
-            matchesCategory &&
-            matchesSearch
-          );
-        },
-      );
-    }, [
-      products,
-      selectedCategory,
-      productSearch,
-    ]);
 
   const lowStockCount =
     products.filter(
@@ -1366,6 +1431,19 @@ export default function Home() {
       );
     };
 
+  if (
+    !isBusinessAccessChecked
+  ) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
+        <p className="font-bold">
+          Checking business
+          access...
+        </p>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
       <header className="flex flex-wrap items-center justify-between gap-4 bg-slate-950 px-6 py-4 text-white shadow-lg">
@@ -1488,15 +1566,25 @@ export default function Home() {
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={
+          <AccountMenu
+            businessName={
+              businessSettings?.businessName ??
+              "KAY POS"
+            }
+            locationName={
+              businessSettings?.locationName ??
+              "Main Branch"
+            }
+            activeStaff={
+              activeStaff
+            }
+            hasCurrentOrder={
+              cart.length > 0
+            }
+            onSwitchStaff={
               handleSwitchStaff
             }
-            className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/20"
-          >
-            Switch Staff
-          </button>
+          />
 
           <div className="text-right">
             <p className="text-sm font-semibold">
@@ -1554,352 +1642,79 @@ export default function Home() {
             : "xl:grid-cols-[150px_minmax(0,1fr)_390px]"
         }`}
       >
-        {!isDeliTemplate && (
-        <aside className="border-r border-slate-200 bg-white p-3">
-          <p className="mb-3 px-3 pt-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-            Categories
-          </p>
-
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-1">
-            {categories.map(
-              (
-                category,
-              ) => {
-                const isSelected =
-                  category ===
-                  selectedCategory;
-
-                return (
-                  <button
-                    key={
-                      category
-                    }
-                    type="button"
-                    onClick={() =>
-                      setSelectedCategory(
-                        category,
-                      )
-                    }
-                    className={`rounded-xl px-4 py-4 text-left text-sm font-bold transition ${
-                      isSelected
-                        ? "bg-orange-500 text-white shadow-md"
-                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    {
-                      category
-                    }
-                  </button>
-                );
-              },
-            )}
-          </div>
-        </aside>
+        {isDeliTemplate ? (
+          <DeliPOS
+            categories={
+              categories
+            }
+            selectedCategory={
+              selectedCategory
+            }
+            onSelectedCategoryChange={
+              setSelectedCategory
+            }
+            products={
+              products
+            }
+            productSearch={
+              productSearch
+            }
+            onProductSearchChange={
+              setProductSearch
+            }
+            orderType={
+              orderType
+            }
+            onOrderTypeChange={
+              setOrderType
+            }
+            taxType={
+              taxType
+            }
+            onTaxTypeChange={
+              setTaxType
+            }
+            onAddProduct={
+              addProduct
+            }
+          />
+        ) : (
+          <FastFoodPOS
+            categories={
+              categories
+            }
+            selectedCategory={
+              selectedCategory
+            }
+            onSelectedCategoryChange={
+              setSelectedCategory
+            }
+            products={
+              products
+            }
+            productSearch={
+              productSearch
+            }
+            onProductSearchChange={
+              setProductSearch
+            }
+            orderType={
+              orderType
+            }
+            onOrderTypeChange={
+              setOrderType
+            }
+            taxType={
+              taxType
+            }
+            onTaxTypeChange={
+              setTaxType
+            }
+            onAddProduct={
+              addProduct
+            }
+          />
         )}
-
-        <section className="min-w-0 p-5">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-slate-500">
-                {isDeliTemplate
-                  ? "Build the customer order from the deli counter"
-                  : "Select products to add them to the order"}
-              </p>
-
-              <h2 className="text-2xl font-black">
-                {isDeliTemplate
-                  ? "Deli Counter"
-                  : selectedCategory}
-              </h2>
-            </div>
-
-            <div className="flex rounded-xl bg-white p-1 shadow-sm">
-              {(
-                [
-                  "Takeaway",
-                  "Eat In",
-                  "Delivery",
-                ] as OrderType[]
-              ).map(
-                (
-                  type,
-                ) => (
-                  <button
-                    key={
-                      type
-                    }
-                    type="button"
-                    onClick={() =>
-                      setOrderType(
-                        type,
-                      )
-                    }
-                    className={`rounded-lg px-4 py-2 text-sm font-bold transition ${
-                      orderType ===
-                      type
-                        ? "bg-slate-950 text-white"
-                        : "text-slate-500 hover:bg-slate-100"
-                    }`}
-                  >
-                    {type}
-                  </button>
-                ),
-              )}
-            </div>
-          </div>
-
-          {isDeliTemplate && (
-            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-black text-slate-950">
-                    Deli categories
-                  </p>
-
-                  <p className="mt-1 text-xs text-slate-500">
-                    Choose a counter
-                    section or search
-                    the menu.
-                  </p>
-                </div>
-
-                <input
-                  type="search"
-                  value={
-                    productSearch
-                  }
-                  onChange={(
-                    event,
-                  ) =>
-                    setProductSearch(
-                      event.target
-                        .value,
-                    )
-                  }
-                  placeholder="Search sandwiches, paninis, drinks..."
-                  className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-500 sm:w-80"
-                />
-              </div>
-
-              <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-                {categories.map(
-                  (category) => {
-                    const selected =
-                      category ===
-                      selectedCategory;
-
-                    return (
-                      <button
-                        key={
-                          category
-                        }
-                        type="button"
-                        onClick={() =>
-                          setSelectedCategory(
-                            category,
-                          )
-                        }
-                        className={`shrink-0 rounded-xl px-4 py-3 text-sm font-black transition ${
-                          selected
-                            ? "bg-orange-500 text-white shadow-sm"
-                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                        }`}
-                      >
-                        {
-                          category
-                        }
-                      </button>
-                    );
-                  },
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div>
-              <p className="text-sm font-black text-slate-950">
-                Sale type
-              </p>
-
-              <p className="mt-1 text-xs text-slate-500">
-                Select whether
-                this order includes
-                VAT.
-              </p>
-            </div>
-
-            <div className="flex rounded-xl bg-slate-100 p-1">
-              <button
-                type="button"
-                onClick={() =>
-                  setTaxType(
-                    "VAT",
-                  )
-                }
-                className={`rounded-lg px-5 py-3 text-sm font-bold transition ${
-                  taxType ===
-                  "VAT"
-                    ? "bg-orange-500 text-white shadow-sm"
-                    : "text-slate-600 hover:bg-white"
-                }`}
-              >
-                VAT Sale
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setTaxType(
-                    "NON_VAT",
-                  )
-                }
-                className={`rounded-lg px-5 py-3 text-sm font-bold transition ${
-                  taxType ===
-                  "NON_VAT"
-                    ? "bg-slate-950 text-white shadow-sm"
-                    : "text-slate-600 hover:bg-white"
-                }`}
-              >
-                Non-VAT Sale
-              </button>
-            </div>
-          </div>
-
-          <div
-            className={`grid gap-4 ${
-              isDeliTemplate
-                ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-                : "grid-cols-2 md:grid-cols-3 2xl:grid-cols-4"
-            }`}
-          >
-            {filteredProducts.map(
-              (
-                product,
-              ) => {
-                const stockStatus =
-                  getProductStockStatus(
-                    product,
-                  );
-
-                const sellable =
-                  isProductSellable(
-                    product,
-                  );
-
-                return (
-                  <button
-                    key={
-                      product.id
-                    }
-                    type="button"
-                    disabled={
-                      !sellable
-                    }
-                    onClick={() =>
-                      addProduct(
-                        product,
-                      )
-                    }
-                    className={`relative rounded-2xl border p-5 text-left shadow-sm transition ${
-                      isDeliTemplate
-                        ? "min-h-40"
-                        : "min-h-48"
-                    } ${
-                      sellable
-                        ? "border-slate-200 bg-white hover:-translate-y-1 hover:border-orange-400 hover:shadow-lg"
-                        : "cursor-not-allowed border-slate-200 bg-slate-200 opacity-60"
-                    }`}
-                  >
-                    {!product.available && (
-                      <span className="absolute right-3 top-3 rounded-full bg-slate-700 px-2 py-1 text-xs font-bold text-white">
-                        Disabled
-                      </span>
-                    )}
-
-                    {product.available &&
-                      stockStatus ===
-                        "OUT_OF_STOCK" && (
-                        <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-1 text-xs font-bold text-white">
-                          Out of stock
-                        </span>
-                      )}
-
-                    {product.available &&
-                      stockStatus ===
-                        "LOW_STOCK" && (
-                        <span className="absolute right-3 top-3 rounded-full bg-amber-500 px-2 py-1 text-xs font-bold text-white">
-                          Low:{" "}
-                          {
-                            product.stockQuantity
-                          }
-                        </span>
-                      )}
-
-                    <span
-                      className={`block ${
-                        isDeliTemplate
-                          ? "text-4xl"
-                          : "text-5xl"
-                      }`}
-                    >
-                      {
-                        product.emoji
-                      }
-                    </span>
-
-                    <h3 className="mt-4 font-black leading-tight">
-                      {
-                        product.name
-                      }
-                    </h3>
-
-                    <p className="mt-2 text-xs leading-5 text-slate-500">
-                      {
-                        product.description
-                      }
-                    </p>
-
-                    <div className="mt-3 flex items-end justify-between gap-3">
-                      <p className="text-lg font-black text-orange-600">
-                        {currencyFormatter.format(
-                          product.price,
-                        )}
-                      </p>
-
-                      <p className="text-xs font-bold text-slate-500">
-                        {product.trackStock
-                          ? `${product.stockQuantity} left`
-                          : "Not tracked"}
-                      </p>
-                    </div>
-                  </button>
-                );
-              },
-            )}
-
-            {filteredProducts.length ===
-              0 && (
-              <div className="col-span-full rounded-2xl border-2 border-dashed border-slate-300 bg-white p-10 text-center">
-                <p className="text-4xl">
-                  {isDeliTemplate
-                    ? "🥪"
-                    : "📦"}
-                </p>
-
-                <h3 className="mt-3 font-black text-slate-900">
-                  No products here yet
-                </h3>
-
-                <p className="mt-2 text-sm text-slate-500">
-                  {isDeliTemplate
-                    ? "Use Manage Menu to add the deli's first sandwiches, paninis, drinks or other products."
-                    : "No products match this category."}
-                </p>
-              </div>
-            )}
-          </div>
-        </section>
 
         <aside className="flex min-h-[600px] flex-col border-l border-slate-200 bg-white">
           <div className="border-b border-slate-200 p-5">
